@@ -1,0 +1,831 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Image Field Line Simulator</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101114;
+      --panel: #191b20;
+      --panel2: #22252b;
+      --text: #f1f3f5;
+      --muted: #9aa1aa;
+      --border: #343840;
+      --accent: #82b1ff;
+      --danger: #ff7b7b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .app {
+      display: grid;
+      grid-template-columns: minmax(260px, 340px) 1fr;
+      min-height: 100vh;
+    }
+    aside {
+      padding: 18px;
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+    }
+    main {
+      display: grid;
+      place-items: center;
+      min-width: 0;
+      padding: 18px;
+    }
+    h1 {
+      font-size: 18px;
+      margin: 0 0 6px;
+      font-weight: 650;
+    }
+    .sub {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+      margin-bottom: 16px;
+    }
+    .group {
+      border-top: 1px solid var(--border);
+      padding-top: 14px;
+      margin-top: 14px;
+    }
+    label {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px 12px;
+      align-items: center;
+      margin: 12px 0;
+      font-size: 13px;
+    }
+    label input[type="range"] {
+      grid-column: 1 / -1;
+      width: 100%;
+    }
+    input[type="file"] {
+      width: 100%;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    input[type="number"], select {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel2);
+      color: var(--text);
+      padding: 8px 10px;
+    }
+    input[type="range"] {
+      accent-color: var(--accent);
+    }
+    .value {
+      min-width: 58px;
+      text-align: right;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    button {
+      border: 1px solid var(--border);
+      background: var(--panel2);
+      color: var(--text);
+      border-radius: 9px;
+      padding: 10px 12px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button.primary {
+      background: var(--accent);
+      color: #0d1520;
+      border-color: transparent;
+    }
+    button.danger {
+      color: var(--danger);
+    }
+    button:disabled {
+      opacity: .45;
+      cursor: not-allowed;
+    }
+    .status {
+      min-height: 20px;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .canvas-wrap {
+      width: min(100%, 1100px);
+      aspect-ratio: 1 / 1;
+      border: 1px solid var(--border);
+      background: white;
+      position: relative;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    .drop {
+      margin-top: 10px;
+      border: 1px dashed var(--border);
+      border-radius: 9px;
+      padding: 12px;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+    .hint {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      margin-top: 10px;
+    }
+    @media (max-width: 760px) {
+      .app { grid-template-columns: 1fr; }
+      aside { border-right: none; border-bottom: 1px solid var(--border); }
+      main { padding: 10px; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <h1>Image Field Line Simulator</h1>
+    <div class="sub">
+      Upload an image. It is decoded only into memory and never displayed. Lines begin at random positions, initially aimed toward the centre, then bend through brightness, darkness and edge fields.
+    </div>
+
+    <input id="file" type="file" accept="image/*" />
+    <div id="drop" class="drop">Drop an image here</div>
+
+    <div class="group">
+      <label>
+        Darkness attraction / repulsion
+        <span id="darkVal" class="value">0.00</span>
+        <input id="dark" type="range" min="-3" max="3" step="any" value="0.8" />
+      </label>
+
+      <label>
+        Brightness attraction / repulsion
+        <span id="brightVal" class="value">0.00</span>
+        <input id="bright" type="range" min="-3" max="3" step="any" value="-0.2" />
+      </label>
+
+      <label>
+        Edge / local contrast attraction / repulsion
+        <span id="edgeVal" class="value">0.00</span>
+        <input id="edge" type="range" min="-4" max="4" step="any" value="1.4" />
+      </label>
+    </div>
+
+    <div class="group">
+      <label>
+        Line count
+        <span id="countVal" class="value">800</span>
+        <input id="count" type="range" min="1" max="5000" step="any" value="800" />
+      </label>
+
+      <label>
+        Line length
+        <span id="lengthVal" class="value">220</span>
+        <input id="length" type="range" min="5" max="1200" step="any" value="220" />
+      </label>
+
+      <label>
+        Centre attraction
+        <span id="centerVal" class="value">0.00</span>
+        <input id="center" type="range" min="0" max="0.3" step="any" value="0.00" />
+      </label>
+
+      <label>
+        Spawn spread from centre
+        <span id="spawnSpreadVal" class="value">1.00</span>
+        <input id="spawnSpread" type="range" min="0" max="1" step="any" value="1.00" />
+      </label>
+
+      <label>
+        Image field scale
+        <span id="fieldScaleVal" class="value">1.00</span>
+        <input id="fieldScale" type="range" min="0.1" max="3" step="any" value="1.00" />
+      </label>
+
+      <label>
+        Look-ahead distance
+        <span id="lookAheadVal" class="value">0.00</span>
+        <input id="lookAhead" type="range" min="0" max="50" step="any" value="0.00" />
+      </label>
+
+      <label>
+        Line opacity
+        <span id="opacityVal" class="value">0.70</span>
+        <input id="opacity" type="range" min="0.02" max="1" step="any" value="0.70" />
+      </label>
+
+      <label>
+        Step size
+        <span id="stepVal" class="value">1.50</span>
+        <input id="step" type="range" min="0.25" max="5" step="any" value="1.5" />
+      </label>
+
+      <label>
+        Field smoothing
+        <span id="smoothVal" class="value">2</span>
+        <input id="smooth" type="range" min="1" max="12" step="any" value="2" />
+      </label>
+
+      <label>
+        Turn inertia
+        <span id="inertiaVal" class="value">0.86</span>
+        <input id="inertia" type="range" min="0" max="0.99" step="any" value="0.86" />
+      </label>
+
+      <label>
+        Inertia variation
+        <span id="inertiaVariationVal" class="value">0.00</span>
+        <input id="inertiaVariation" type="range" min="0" max="0.5" step="any" value="0.00" />
+      </label>
+
+      <label>
+        Speed gain
+        <span id="speedGainVal" class="value">0.00</span>
+        <input id="speedGain" type="range" min="0" max="2" step="any" value="0.00" />
+      </label>
+    </div>
+
+    <div class="group">
+      <label style="display:flex; grid-template-columns:none; align-items:center; gap:10px;">
+        <input id="autoRun" type="checkbox" />
+        <span>Automatically rerun when simulation values change</span>
+      </label>
+      <div class="row">
+        <button id="run" class="primary" disabled>Run simulation</button>
+        <button id="cancel" class="danger" disabled>Cancel</button>
+      </div>
+      <div class="row">
+        <button id="export" disabled>Export SVG</button>
+        <button id="clear">Clear</button>
+      </div>
+      <div id="status" class="status" aria-live="polite">Upload an image to begin.</div>
+      <div class="hint">
+        Negative values repel; positive values attract. The three fields are combined as directional forces. Export uses the current canvas dimensions and line paths.
+      </div>
+    </div>
+  </aside>
+
+  <main>
+    <div class="canvas-wrap">
+      <canvas id="canvas" width="1000" height="1000"></canvas>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const el = id => document.getElementById(id);
+  const canvas = el('canvas');
+  const ctx = canvas.getContext('2d');
+  const fileInput = el('file');
+  const drop = el('drop');
+  const runBtn = el('run');
+  const cancelBtn = el('cancel');
+  const exportBtn = el('export');
+  const clearBtn = el('clear');
+  const statusEl = el('status');
+  const autoRun = el('autoRun');
+  let autoRunTimer = null;
+
+  let imageDataPayload = null;
+  let worker = null;
+  let paths = [];
+
+  const controls = {
+    dark: el('dark'),
+    bright: el('bright'),
+    edge: el('edge'),
+    count: el('count'),
+    length: el('length'),
+    center: el('center'),
+    spawnSpread: el('spawnSpread'),
+    fieldScale: el('fieldScale'),
+    lookAhead: el('lookAhead'),
+    opacity: el('opacity'),
+    step: el('step'),
+    smooth: el('smooth'),
+    inertia: el('inertia'),
+    inertiaVariation: el('inertiaVariation'),
+    speedGain: el('speedGain')
+  };
+
+  const valueTargets = {
+    dark: el('darkVal'),
+    bright: el('brightVal'),
+    edge: el('edgeVal'),
+    count: el('countVal'),
+    length: el('lengthVal'),
+    center: el('centerVal'),
+    spawnSpread: el('spawnSpreadVal'),
+    fieldScale: el('fieldScaleVal'),
+    lookAhead: el('lookAheadVal'),
+    opacity: el('opacityVal'),
+    step: el('stepVal'),
+    smooth: el('smoothVal'),
+    inertia: el('inertiaVal'),
+    inertiaVariation: el('inertiaVariationVal'),
+    speedGain: el('speedGainVal')
+  };
+
+  function syncLabels() {
+    valueTargets.dark.textContent = Number(controls.dark.value).toFixed(2);
+    valueTargets.bright.textContent = Number(controls.bright.value).toFixed(2);
+    valueTargets.edge.textContent = Number(controls.edge.value).toFixed(2);
+    valueTargets.count.textContent = controls.count.value;
+    valueTargets.length.textContent = controls.length.value;
+    valueTargets.center.textContent = Number(controls.center.value).toFixed(2);
+    valueTargets.spawnSpread.textContent = Number(controls.spawnSpread.value).toFixed(2);
+    valueTargets.fieldScale.textContent = Number(controls.fieldScale.value).toFixed(2);
+    valueTargets.lookAhead.textContent = Number(controls.lookAhead.value).toFixed(2);
+    valueTargets.opacity.textContent = Number(controls.opacity.value).toFixed(2);
+    valueTargets.step.textContent = Number(controls.step.value).toFixed(2);
+    valueTargets.smooth.textContent = Number(controls.smooth.value).toFixed(2);
+    valueTargets.inertia.textContent = Number(controls.inertia.value).toFixed(2);
+    valueTargets.inertiaVariation.textContent = Number(controls.inertiaVariation.value).toFixed(2);
+    valueTargets.speedGain.textContent = Number(controls.speedGain.value).toFixed(2);
+  }
+  Object.values(controls).forEach(c => c.addEventListener('input', syncLabels));
+  syncLabels();
+
+  function scheduleAutoRun() {
+    if (!autoRun.checked || !imageDataPayload) return;
+    clearTimeout(autoRunTimer);
+    autoRunTimer = setTimeout(() => startSimulation(), 280);
+  }
+
+  Object.entries(controls).forEach(([name, control]) => {
+    control.addEventListener('input', () => {
+      if (name === 'opacity') {
+        if (paths.length) drawPaths(paths);
+      } else {
+        scheduleAutoRun();
+      }
+    });
+  });
+  autoRun.addEventListener('change', () => {
+    if (autoRun.checked) scheduleAutoRun();
+  });
+
+  function clearCanvas() {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    paths = [];
+    exportBtn.disabled = true;
+  }
+  clearCanvas();
+
+  function fitImageToField(img) {
+    const maxDim = 700;
+    const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.max(2, Math.round(img.naturalWidth * scale));
+    const h = Math.max(2, Math.round(img.naturalHeight * scale));
+
+    const off = document.createElement('canvas');
+    off.width = w;
+    off.height = h;
+    const octx = off.getContext('2d', { willReadFrequently: true });
+    octx.drawImage(img, 0, 0, w, h);
+    const data = octx.getImageData(0, 0, w, h).data;
+
+    const gray = new Float32Array(w * h);
+    for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+      gray[p] = (0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]) / 255;
+    }
+    return { w, h, gray };
+  }
+
+  async function loadFile(file) {
+    if (!file || !file.type.startsWith('image/')) {
+      statusEl.textContent = 'Please choose an image file.';
+      return;
+    }
+
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      img.decoding = 'async';
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error('Could not decode image.'));
+        img.src = url;
+      });
+      imageDataPayload = fitImageToField(img);
+      runBtn.disabled = false;
+      statusEl.textContent = `Image loaded into memory: ${imageDataPayload.w} × ${imageDataPayload.h} field.`;
+      scheduleAutoRun();
+    } catch (err) {
+      statusEl.textContent = err.message;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  fileInput.addEventListener('change', e => loadFile(e.target.files[0]));
+  drop.addEventListener('dragover', e => {
+    e.preventDefault();
+    drop.style.borderColor = 'var(--accent)';
+  });
+  drop.addEventListener('dragleave', () => {
+    drop.style.borderColor = '';
+  });
+  drop.addEventListener('drop', e => {
+    e.preventDefault();
+    drop.style.borderColor = '';
+    loadFile(e.dataTransfer.files[0]);
+  });
+
+  const workerSource = `
+    let cancelled = false;
+
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+    self.onmessage = function(e) {
+      const msg = e.data;
+      if (msg.type === 'cancel') {
+        cancelled = true;
+        return;
+      }
+      if (msg.type !== 'run') return;
+
+      cancelled = false;
+      const { field, params, canvas } = msg;
+      const w = field.w, h = field.h;
+      const gray = new Float32Array(field.gray);
+      const contrast = buildContrast(gray, w, h, params.smooth);
+      const paths = [];
+      const cx = canvas.width * 0.5;
+      const cy = canvas.height * 0.5;
+      const sx = (w - 1) / Math.max(1, canvas.width - 1);
+      const sy = (h - 1) / Math.max(1, canvas.height - 1);
+
+      for (let n = 0; n < params.count; n++) {
+        if (cancelled) {
+          self.postMessage({ type: 'cancelled' });
+          return;
+        }
+
+        // Spawn within a true circular radius rather than a square.
+        // sqrt(random) gives an even distribution over the circle's area.
+        // Each line also receives up to ±20% variation in its maximum radius.
+        const baseMaxRadius =
+          Math.min(canvas.width, canvas.height) * 0.5 * params.spawnSpread;
+        const radiusVariation = 0.8 + Math.random() * 0.4;
+        const lineMaxRadius = Math.min(
+          Math.min(canvas.width, canvas.height) * 0.5,
+          baseMaxRadius * radiusVariation
+        );
+        const spawnAngle = Math.random() * Math.PI * 2;
+        const spawnRadius = Math.sqrt(Math.random()) * lineMaxRadius;
+
+        let x = cx + Math.cos(spawnAngle) * spawnRadius;
+        let y = cy + Math.sin(spawnAngle) * spawnRadius;
+
+        let dx = cx - x;
+        let dy = cy - y;
+        let mag = Math.hypot(dx, dy);
+        if (mag < 0.000001) {
+          // At the exact centre there is no natural inward direction.
+          const angle = Math.random() * Math.PI * 2;
+          dx = Math.cos(angle);
+          dy = Math.sin(angle);
+        } else {
+          dx /= mag;
+          dy /= mag;
+        }
+
+        // Add up to ±20% directional variation around the inward heading.
+        // Here 20% maps to ±0.2π radians, i.e. roughly ±36 degrees.
+        const headingJitter = (Math.random() * 2 - 1) * Math.PI * 0.2;
+        const cosJ = Math.cos(headingJitter);
+        const sinJ = Math.sin(headingJitter);
+        const jitteredDx = dx * cosJ - dy * sinJ;
+        const jitteredDy = dx * sinJ + dy * cosJ;
+        dx = jitteredDx;
+        dy = jitteredDy;
+
+        const pts = new Float32Array((params.length + 1) * 2);
+        pts[0] = x; pts[1] = y;
+        let used = 1;
+
+        // Each line receives a stable random offset around the global inertia.
+        // At maximum variation, lines can differ by up to ±0.5.
+        const lineInertia = clamp(
+          params.inertia + (Math.random() * 2 - 1) * params.inertiaVariation,
+          0,
+          0.995
+        );
+
+        // Velocity is expressed as a multiplier of the base step size.
+        let velocity = 1;
+
+        for (let i = 0; i < params.length; i++) {
+          // Sample ahead of the particle so it can anticipate changes in the
+          // field rather than only reacting once it reaches them.
+          const sampleX = x + dx * params.lookAhead;
+          const sampleY = y + dy * params.lookAhead;
+
+          // Scale the invisible image field around the canvas centre.
+          // Below 1 the complete image occupies a smaller central region;
+          // above 1 zooms into the image.
+          const fx = ((sampleX - cx) / params.fieldScale + cx) * sx;
+          const fy = ((sampleY - cy) / params.fieldScale + cy) * sy;
+
+          // Neutral brightness and zero contrast outside a scaled-down image
+          // prevent its border pixels from being stretched across the canvas.
+          const brightGrad = gradient(gray, w, h, fx, fy, 0.5);
+          const darkGrad = { x: -brightGrad.x, y: -brightGrad.y };
+          const edgeGrad = gradient(contrast, w, h, fx, fy, 0);
+
+          let centerX = cx - x;
+          let centerY = cy - y;
+          const centerMag = Math.hypot(centerX, centerY) || 1;
+          centerX /= centerMag;
+          centerY /= centerMag;
+
+          let forceX =
+            darkGrad.x * params.dark +
+            brightGrad.x * params.bright +
+            edgeGrad.x * params.edge +
+            centerX * params.center * 3.5;
+
+          let forceY =
+            darkGrad.y * params.dark +
+            brightGrad.y * params.bright +
+            edgeGrad.y * params.edge +
+            centerY * params.center * 3.5;
+
+          const fmag = Math.hypot(forceX, forceY);
+          if (fmag > 0.000001) {
+            forceX /= fmag;
+            forceY /= fmag;
+          }
+
+          // Attraction that points along the current heading accelerates the
+          // particle. Sideways or backwards attraction does not add speed.
+          const forwardPull = Math.max(0, dx * forceX + dy * forceY);
+          const targetVelocity = 1 + forwardPull * params.speedGain * 3;
+          velocity += (targetVelocity - velocity) * 0.12;
+
+          // Faster lines carry more momentum and therefore resist sharp turns.
+          const speedResistance = params.speedGain > 0
+            ? (velocity - 1) / Math.max(0.000001, params.speedGain * 3)
+            : 0;
+          const effectiveInertia = clamp(
+            lineInertia + speedResistance * (1 - lineInertia) * 0.75,
+            0,
+            0.997
+          );
+
+          dx = dx * effectiveInertia + forceX * (1 - effectiveInertia);
+          dy = dy * effectiveInertia + forceY * (1 - effectiveInertia);
+          mag = Math.hypot(dx, dy) || 1;
+          dx /= mag;
+          dy /= mag;
+
+          x += dx * params.step * velocity;
+          y += dy * params.step * velocity;
+
+          if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) break;
+          pts[used * 2] = x;
+          pts[used * 2 + 1] = y;
+          used++;
+        }
+
+        paths.push(pts.slice(0, used * 2));
+
+        if ((n + 1) % 25 === 0 || n === params.count - 1) {
+          self.postMessage({ type: 'progress', done: n + 1, total: params.count });
+        }
+      }
+
+      const transfer = paths.map(p => p.buffer);
+      self.postMessage({ type: 'done', paths }, transfer);
+    };
+
+    function sample(arr, w, h, x, y, outsideValue = null) {
+      if (
+        outsideValue !== null &&
+        (x < 0 || y < 0 || x > w - 1 || y > h - 1)
+      ) {
+        return outsideValue;
+      }
+
+      x = clamp(x, 0, w - 1);
+      y = clamp(y, 0, h - 1);
+      const x0 = Math.floor(x), y0 = Math.floor(y);
+      const x1 = Math.min(w - 1, x0 + 1), y1 = Math.min(h - 1, y0 + 1);
+      const tx = x - x0, ty = y - y0;
+      const a = arr[y0 * w + x0];
+      const b = arr[y0 * w + x1];
+      const c = arr[y1 * w + x0];
+      const d = arr[y1 * w + x1];
+      return (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty;
+    }
+
+    function gradient(arr, w, h, x, y, outsideValue = null) {
+      const gx =
+        sample(arr, w, h, x + 1, y, outsideValue) -
+        sample(arr, w, h, x - 1, y, outsideValue);
+      const gy =
+        sample(arr, w, h, x, y + 1, outsideValue) -
+        sample(arr, w, h, x, y - 1, outsideValue);
+      return { x: gx, y: gy };
+    }
+
+    function buildContrast(gray, w, h, radius) {
+      const out = new Float32Array(w * h);
+      for (let y = 0; y < h; y++) {
+        if (cancelled) return out;
+        for (let x = 0; x < w; x++) {
+          const l = sample(gray, w, h, x - radius, y);
+          const r = sample(gray, w, h, x + radius, y);
+          const u = sample(gray, w, h, x, y - radius);
+          const d = sample(gray, w, h, x, y + radius);
+          const ul = sample(gray, w, h, x - radius, y - radius);
+          const ur = sample(gray, w, h, x + radius, y - radius);
+          const dl = sample(gray, w, h, x - radius, y + radius);
+          const dr = sample(gray, w, h, x + radius, y + radius);
+          const gx = (ur + 2*r + dr) - (ul + 2*l + dl);
+          const gy = (dl + 2*d + dr) - (ul + 2*u + ur);
+          out[y * w + x] = Math.hypot(gx, gy);
+        }
+      }
+      return out;
+    }
+  `;
+
+  function makeWorker() {
+    const blob = new Blob([workerSource], { type: 'text/javascript' });
+    return new Worker(URL.createObjectURL(blob));
+  }
+
+  function drawPaths(allPaths) {
+    clearCanvas();
+    ctx.strokeStyle = '#111111';
+    ctx.globalAlpha = Number(controls.opacity.value);
+    ctx.lineWidth = 0.7;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    for (const p of allPaths) {
+      if (p.length < 4) continue;
+      ctx.beginPath();
+      ctx.moveTo(p[0], p[1]);
+      for (let i = 2; i < p.length; i += 2) {
+        ctx.lineTo(p[i], p[i + 1]);
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    paths = allPaths;
+    exportBtn.disabled = paths.length === 0;
+  }
+
+  function startSimulation() {
+    if (!imageDataPayload) return;
+
+    clearTimeout(autoRunTimer);
+    if (worker) worker.terminate();
+    worker = makeWorker();
+
+    runBtn.disabled = true;
+    cancelBtn.disabled = false;
+    exportBtn.disabled = true;
+    statusEl.textContent = 'Preparing image fields…';
+
+    worker.onmessage = e => {
+      const msg = e.data;
+      if (msg.type === 'progress') {
+        statusEl.textContent = `Tracing lines… ${msg.done} / ${msg.total}`;
+      } else if (msg.type === 'done') {
+        drawPaths(msg.paths.map(p => new Float32Array(p)));
+        statusEl.textContent = `Done. ${msg.paths.length} lines generated.`;
+        runBtn.disabled = false;
+        cancelBtn.disabled = true;
+        worker.terminate();
+        worker = null;
+      } else if (msg.type === 'cancelled') {
+        statusEl.textContent = 'Simulation cancelled.';
+        runBtn.disabled = false;
+        cancelBtn.disabled = true;
+        worker.terminate();
+        worker = null;
+      }
+    };
+
+    worker.onerror = err => {
+      statusEl.textContent = 'Worker error: ' + err.message;
+      runBtn.disabled = false;
+      cancelBtn.disabled = true;
+      worker.terminate();
+      worker = null;
+    };
+
+    const grayCopy = imageDataPayload.gray.slice();
+    worker.postMessage({
+      type: 'run',
+      field: {
+        w: imageDataPayload.w,
+        h: imageDataPayload.h,
+        gray: grayCopy.buffer
+      },
+      params: {
+        dark: Number(controls.dark.value),
+        bright: Number(controls.bright.value),
+        edge: Number(controls.edge.value),
+        count: Number(controls.count.value),
+        length: Number(controls.length.value),
+        center: Number(controls.center.value),
+        spawnSpread: Number(controls.spawnSpread.value),
+        fieldScale: Number(controls.fieldScale.value),
+        lookAhead: Number(controls.lookAhead.value),
+        step: Number(controls.step.value),
+        smooth: Number(controls.smooth.value),
+        inertia: Number(controls.inertia.value),
+        inertiaVariation: Number(controls.inertiaVariation.value),
+        speedGain: Number(controls.speedGain.value)
+      },
+      canvas: { width: canvas.width, height: canvas.height }
+    }, [grayCopy.buffer]);
+  }
+
+  runBtn.addEventListener('click', startSimulation);
+
+  cancelBtn.addEventListener('click', () => {
+    clearTimeout(autoRunTimer);
+    if (worker) {
+      worker.terminate();
+      worker = null;
+      statusEl.textContent = 'Simulation cancelled.';
+      runBtn.disabled = false;
+      cancelBtn.disabled = true;
+    }
+  });
+
+  clearBtn.addEventListener('click', () => {
+    if (worker) {
+      worker.terminate();
+      worker = null;
+    }
+    runBtn.disabled = !imageDataPayload;
+    cancelBtn.disabled = true;
+    clearCanvas();
+    statusEl.textContent = imageDataPayload ? 'Canvas cleared.' : 'Upload an image to begin.';
+  });
+
+  exportBtn.addEventListener('click', () => {
+    if (!paths.length) return;
+
+    const esc = s => String(s).replace(/[&<>"']/g, ch => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;'
+    }[ch]));
+
+    const lines = paths.map(p => {
+      if (p.length < 4) return '';
+      let d = `M ${p[0].toFixed(2)} ${p[1].toFixed(2)}`;
+      for (let i = 2; i < p.length; i += 2) {
+        d += ` L ${p[i].toFixed(2)} ${p[i + 1].toFixed(2)}`;
+      }
+      return `<path d="${esc(d)}" />`;
+    }).join('\n  ');
+
+    const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="${canvas.width}" height="${canvas.height}"
+     viewBox="0 0 ${canvas.width} ${canvas.height}">
+  <rect width="100%" height="100%" fill="white"/>
+  <g fill="none" stroke="#111" stroke-opacity="${Number(controls.opacity.value).toFixed(2)}" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round">
+  ${lines}
+  </g>
+</svg>`;
+
+    const blob = new Blob([svg], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'image-field-lines.svg';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,862 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Interacting-Worlds Double-Slit Toy Model</title>
+<style>
+  :root{
+    --bg:#f6f7f9;
+    --panel:#ffffff;
+    --canvas:#f2f3f5;
+    --text:#17191c;
+    --muted:#6b7280;
+    --border:#d7dbe0;
+    --accent:#2f8cff;
+    --soft:#eef4ff;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font:15px/1.4 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  }
+  main{max-width:1200px;margin:0 auto;padding:20px}
+  h1{font-size:24px;margin:0 0 14px}
+  h2{font-size:18px;margin:18px 0 8px}
+  .grid{display:grid;grid-template-columns:2fr 1fr;gap:14px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:14px}
+  .controls{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+  label{display:block;font-size:13px;color:var(--muted)}
+  input,select,button{font:inherit}
+  input[type=number],select{
+    width:100%;
+    padding:8px 10px;
+    border:1px solid var(--border);
+    border-radius:10px;
+    background:#fff;
+    color:var(--text);
+  }
+  input[type=range]{width:100%}
+  .row{display:flex;gap:8px;align-items:center}
+  .check-row{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:10px;
+    margin-top:12px;
+  }
+  .check{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    color:var(--text);
+    font-size:14px;
+  }
+  button{
+    border:1px solid var(--border);
+    background:#fff;
+    border-radius:10px;
+    padding:9px 12px;
+    cursor:pointer;
+  }
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  button:disabled{opacity:.55;cursor:wait}
+  .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0}
+  .metric{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:10px}
+  .metric b{display:block;font-size:22px;margin-top:3px}
+  canvas{
+    display:block;
+    width:100%;
+    background:var(--canvas);
+    border:1px solid var(--border);
+    border-radius:12px;
+  }
+  #scene{height:430px}
+  #hist{height:260px}
+  .legend{font-size:13px;color:var(--muted)}
+  .note{margin-top:14px;background:var(--soft);border:1px solid #cfe0ff;border-radius:12px;padding:12px}
+  progress{width:100%;height:10px;margin-top:8px}
+  @media(max-width:950px){
+    .grid{grid-template-columns:1fr}
+    .controls{grid-template-columns:repeat(3,1fr)}
+  }
+  @media(max-width:650px){
+    main{padding:12px}
+    .controls{grid-template-columns:repeat(2,1fr)}
+    .metrics{grid-template-columns:repeat(2,1fr)}
+    .check-row{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Interacting-Worlds Double-Slit Toy Model</h1>
+
+  <div class="grid">
+    <section class="card">
+      <label>
+        <div class="row" style="justify-content:space-between">
+          <span>Inter-world force</span>
+          <strong id="forceReadout">0.00 · none</strong>
+        </div>
+        <input id="force" type="range" min="-2" max="2" value="0" step="0.05">
+      </label>
+      <div class="row" style="justify-content:space-between;color:var(--muted);font-size:12px">
+        <span>repulsion</span><span>no force</span><span>attraction</span>
+      </div>
+
+      <div class="controls" style="margin-top:12px">
+        <label>Particles
+          <input id="count" type="number" min="100" max="150000" step="1000" value="20000">
+        </label>
+        <label>Field falloff
+          <select id="exponent">
+            <option value="1">1/r</option>
+            <option value="2" selected>1/r²</option>
+            <option value="3">1/r³</option>
+          </select>
+        </label>
+        <label>Interaction radius
+          <input id="radius" type="number" min="0.03" max="0.5" step="0.01" value="0.16">
+        </label>
+        <label>Softening
+          <input id="softening" type="number" min="0.005" max="0.15" step="0.005" value="0.03">
+        </label>
+        <label>Angular spread (degrees)
+          <input id="angularSpread" type="number" min="1" max="60" step="1" value="26">
+        </label>
+      </div>
+
+      <div class="check-row">
+        <label class="check">
+          <input id="pointOrigin" type="checkbox" checked>
+          <span>Point origin</span>
+        </label>
+        <label class="check">
+          <input id="equalTrajectories" type="checkbox" checked>
+          <span>Evenly spaced launch angles</span>
+        </label>
+      </div>
+      <div style="margin-top:7px;color:var(--muted);font-size:12px">
+        Large runs use a smoothed continuum density field rather than exact particle-to-particle summation.
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="controls" style="grid-template-columns:1fr 1fr">
+        <label>Slit separation
+          <input id="separation" type="number" min="0.12" max="0.7" step="0.02" value="0.32">
+        </label>
+        <label>Slit width
+          <input id="slitWidth" type="number" min="0.04" max="0.28" step="0.01" value="0.12">
+        </label>
+        <label style="grid-column:1/-1">Reference wavelength
+          <input id="wavelength" type="number" min="0.015" max="0.2" step="0.005" value="0.055">
+        </label>
+      </div>
+
+      <div class="row" style="margin-top:12px;flex-wrap:wrap">
+        <button id="run" class="primary">Run simulation</button>
+        <button id="seed">New seed</button>
+        <button id="downloadSvg">Download SVG</button>
+      </div>
+
+      <progress id="progress" value="0" max="1" hidden></progress>
+    </section>
+  </div>
+
+  <div class="metrics">
+    <div class="metric"><span>Reached screen</span><b id="detectedMetric">—</b></div>
+    <div class="metric"><span>Stopped at wall</span><b id="blockedMetric">—</b></div>
+    <div class="metric"><span>Shape similarity</span><b id="similarityMetric">—</b></div>
+    <div class="metric"><span>Run time</span><b id="runtimeMetric">—</b></div>
+  </div>
+
+  <h2>Trajectories</h2>
+  <div class="legend">A representative sample is drawn; every particle contributes to the density field and detector histogram.</div>
+  <canvas id="scene"></canvas>
+
+  <h2>Detector projection</h2>
+  <div class="legend">Blue: simulation · dashed grey: quantum-style reference</div>
+  <canvas id="hist"></canvas>
+
+  <div class="note" id="status">
+    This is a classical toy model. “World distance” is approximated by ordinary 2-D density proximity.
+  </div>
+</main>
+
+<script>
+(() => {
+  "use strict";
+
+  const $ = id => document.getElementById(id);
+  const scene = $("scene");
+  const hist = $("hist");
+  let seedValue = 123456789;
+  let worker = null;
+  let lastResult = null;
+  let debounceTimer = null;
+  let runToken = 0;
+
+  const workerSource = String.raw`
+    "use strict";
+
+    function mulberry32(a){
+      return function(){
+        let t=a+=0x6D2B79F5;
+        t=Math.imul(t^t>>>15,t|1);
+        t^=t+Math.imul(t^t>>>7,t|61);
+        return((t^t>>>14)>>>0)/4294967296;
+      };
+    }
+
+    function gaussian(rng){
+      let u=0,v=0;
+      while(!u)u=rng();
+      while(!v)v=rng();
+      return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+    }
+
+    function blurHorizontal(src,dst,nx,ny,r){
+      const width=2*r+1;
+      for(let y=0;y<ny;y++){
+        const row=y*nx;
+        let sum=0;
+        for(let k=-r;k<=r;k++){
+          const x=Math.max(0,Math.min(nx-1,k));
+          sum+=src[row+x];
+        }
+        for(let x=0;x<nx;x++){
+          dst[row+x]=sum/width;
+          const remove=Math.max(0,Math.min(nx-1,x-r));
+          const add=Math.max(0,Math.min(nx-1,x+r+1));
+          sum+=src[row+add]-src[row+remove];
+        }
+      }
+    }
+
+    function blurVertical(src,dst,nx,ny,r){
+      const width=2*r+1;
+      for(let x=0;x<nx;x++){
+        let sum=0;
+        for(let k=-r;k<=r;k++){
+          const y=Math.max(0,Math.min(ny-1,k));
+          sum+=src[y*nx+x];
+        }
+        for(let y=0;y<ny;y++){
+          dst[y*nx+x]=sum/width;
+          const remove=Math.max(0,Math.min(ny-1,y-r));
+          const add=Math.max(0,Math.min(ny-1,y+r+1));
+          sum+=src[add*nx+x]-src[remove*nx+x];
+        }
+      }
+    }
+
+    self.onmessage = event => {
+      const {config:c,seed,token}=event.data;
+      const started=performance.now();
+      const rng=mulberry32(seed);
+
+      const n=c.n;
+      const steps=n>100000?235:n>50000?250:n>15000?270:300;
+      const dt=2.18/(steps-26);
+      const nx=n>80000?150:136;
+      const ny=n>80000?124:112;
+      const minX=-1.08,maxX=1.04,minY=-0.9,maxY=0.9;
+      const dx=(maxX-minX)/(nx-1);
+      const dy=(maxY-minY)/(ny-1);
+      const invDx=1/dx,invDy=1/dy;
+
+      const x=new Float32Array(n);
+      const y=new Float32Array(n);
+      const vx=new Float32Array(n);
+      const vy=new Float32Array(n);
+      const state=new Uint8Array(n); // 0 moving, 1 blocked, 2 detected
+
+      for(let i=0;i<n;i++){
+        x[i]=c.pointOrigin?-1:-1+gaussian(rng)*0.008;
+        y[i]=c.pointOrigin?0:gaussian(rng)*0.42;
+
+        let angle;
+        if(c.equalTrajectories){
+          const u=n===1?0.5:(i+0.5)/n;
+          angle=(u*2-1)*c.angularSpread;
+        }else{
+          angle=Math.max(-c.angularSpread,Math.min(c.angularSpread,gaussian(rng)*c.angularSpread*0.5));
+        }
+
+        const speed=c.equalTrajectories?1:Math.max(0.9,Math.min(1.1,1+gaussian(rng)*0.035));
+        vx[i]=speed*Math.cos(angle);
+        vy[i]=speed*Math.sin(angle);
+      }
+
+      const sampleCount=Math.min(650,n);
+      const sampleIndex=new Uint32Array(sampleCount);
+      for(let s=0;s<sampleCount;s++)sampleIndex[s]=Math.min(n-1,Math.floor((s+0.5)*n/sampleCount));
+
+      const recordEvery=4;
+      const frames=Math.floor((steps-1)/recordEvery)+2;
+      const pathX=new Float32Array(sampleCount*frames);
+      const pathY=new Float32Array(sampleCount*frames);
+      let frame=0;
+
+      function record(){
+        const base=frame*sampleCount;
+        for(let s=0;s<sampleCount;s++){
+          const i=sampleIndex[s];
+          pathX[base+s]=x[i];
+          pathY[base+s]=y[i];
+        }
+        frame++;
+      }
+      record();
+
+      const density=new Float32Array(nx*ny);
+      const temp=new Float32Array(nx*ny);
+      const smooth=new Float32Array(nx*ny);
+      const gradX=new Float32Array(nx*ny);
+      const gradY=new Float32Array(nx*ny);
+      const bins=120;
+      const histogram=new Uint32Array(bins);
+      const histMin=-0.85,histMax=0.85,histScale=bins/(histMax-histMin);
+      let blocked=0,detected=0;
+
+      const radiusCells=Math.max(1,Math.min(14,Math.round(c.radius/Math.max(dx,dy))));
+      const forceBase=0.022;
+      const exponentGain=c.exponent===1?0.75:c.exponent===2?1:c.exponent===3?1.35:1;
+      const soft=Math.max(0.0001,c.soft);
+      const maxA=12;
+      const maxSpeed=2.8;
+
+      for(let step=0;step<steps;step++){
+        density.fill(0);
+
+        for(let i=0;i<n;i++){
+          if(state[i]===2)continue;
+          const gx=Math.max(0,Math.min(nx-1,Math.round((x[i]-minX)*invDx)));
+          const gy=Math.max(0,Math.min(ny-1,Math.round((y[i]-minY)*invDy)));
+          density[gy*nx+gx]+=1;
+        }
+
+        blurHorizontal(density,temp,nx,ny,radiusCells);
+        blurVertical(temp,smooth,nx,ny,radiusCells);
+        blurHorizontal(smooth,temp,nx,ny,Math.max(1,Math.floor(radiusCells*0.55)));
+        blurVertical(temp,smooth,nx,ny,Math.max(1,Math.floor(radiusCells*0.55)));
+
+        for(let gy=1;gy<ny-1;gy++){
+          const row=gy*nx;
+          for(let gx=1;gx<nx-1;gx++){
+            const idx=row+gx;
+            gradX[idx]=(smooth[idx+1]-smooth[idx-1])*(0.5*invDx);
+            gradY[idx]=(smooth[idx+nx]-smooth[idx-nx])*(0.5*invDy);
+          }
+        }
+
+        const norm=1/Math.max(1,n/(nx*ny));
+        for(let i=0;i<n;i++){
+          if(state[i]!==0)continue;
+
+          const oldX=x[i];
+          const gx=Math.max(1,Math.min(nx-2,Math.round((x[i]-minX)*invDx)));
+          const gy=Math.max(1,Math.min(ny-2,Math.round((y[i]-minY)*invDy)));
+          const idx=gy*nx+gx;
+          const rho=smooth[idx]*norm;
+          const densityScale=1/Math.pow(rho+soft,0.25*(c.exponent-1));
+          let ax=c.strength*forceBase*exponentGain*gradX[idx]*norm*densityScale;
+          let ay=c.strength*forceBase*exponentGain*gradY[idx]*norm*densityScale;
+
+          const amag=Math.hypot(ax,ay);
+          if(amag>maxA){
+            ax*=maxA/amag;
+            ay*=maxA/amag;
+          }
+
+          vx[i]+=ax*dt;
+          vy[i]+=ay*dt;
+
+          const speed=Math.hypot(vx[i],vy[i]);
+          if(speed>maxSpeed){
+            vx[i]*=maxSpeed/speed;
+            vy[i]*=maxSpeed/speed;
+          }
+
+          x[i]+=vx[i]*dt;
+          y[i]+=vy[i]*dt;
+
+          if(oldX<0 && x[i]>=0){
+            const upper=Math.abs(y[i]-c.sep/2)<=c.width/2;
+            const lower=Math.abs(y[i]+c.sep/2)<=c.width/2;
+            if(!upper&&!lower){
+              x[i]=-0.002;
+              vx[i]=0;
+              vy[i]=0;
+              state[i]=1;
+              blocked++;
+            }
+          }
+
+          if(state[i]===0 && oldX<1 && x[i]>=1){
+            state[i]=2;
+            detected++;
+            const k=Math.floor((y[i]-histMin)*histScale);
+            if(k>=0&&k<bins)histogram[k]++;
+          }
+        }
+
+        if((step+1)%recordEvery===0)record();
+        if(step%12===0)self.postMessage({type:"progress",token,value:(step+1)/steps});
+      }
+
+      if(frame<frames)record();
+
+      self.postMessage({
+        type:"result",
+        token,
+        result:{
+          config:c,
+          blocked,
+          detected,
+          histogram,
+          bins,
+          histMin,
+          histMax,
+          sampleCount,
+          frames:frame,
+          pathX,
+          pathY,
+          runtime:performance.now()-started
+        }
+      },[histogram.buffer,pathX.buffer,pathY.buffer]);
+    };
+  `;
+
+  function makeWorker(){
+    if(worker)worker.terminate();
+    const blob=new Blob([workerSource],{type:"text/javascript"});
+    worker=new Worker(URL.createObjectURL(blob));
+    worker.onmessage=event=>{
+      const message=event.data;
+      if(message.token!==runToken)return;
+
+      if(message.type==="progress"){
+        $("progress").value=message.value;
+        return;
+      }
+
+      if(message.type==="result"){
+        lastResult=message.result;
+        render(lastResult);
+        $("run").disabled=false;
+        $("progress").hidden=true;
+      }
+    };
+    worker.onerror=error=>{
+      $("status").textContent="Simulation worker failed: "+error.message;
+      $("run").disabled=false;
+      $("progress").hidden=true;
+    };
+  }
+
+  function values(){
+    return {
+      strength:+$("force").value,
+      n:Math.max(100,Math.min(150000,+$("count").value||20000)),
+      exponent:+$("exponent").value,
+      radius:+$("radius").value,
+      soft:+$("softening").value,
+      sep:+$("separation").value,
+      width:+$("slitWidth").value,
+      wavelength:+$("wavelength").value,
+      angularSpread:+$("angularSpread").value*Math.PI/180,
+      pointOrigin:$("pointOrigin").checked,
+      equalTrajectories:$("equalTrajectories").checked
+    };
+  }
+
+  function updateForceLabel(){
+    const v=+$("force").value;
+    const word=v<-.025?"repulsion":v>.025?"attraction":"none";
+    $("forceReadout").textContent=`${v.toFixed(2)} · ${word}`;
+  }
+
+  function resize(canvas,cssHeight){
+    const dpr=Math.min(2,devicePixelRatio||1);
+    const rect=canvas.getBoundingClientRect();
+    canvas.width=Math.max(320,Math.round(rect.width*dpr));
+    canvas.height=Math.round(cssHeight*dpr);
+    return {w:canvas.width,h:canvas.height,dpr};
+  }
+
+  function smoothedHistogram(result){
+    const source=result.histogram;
+    const smooth=new Float32Array(source.length);
+    for(let i=0;i<source.length;i++){
+      let sum=0,weight=0;
+      for(let d=-2;d<=2;d++){
+        const j=i+d;
+        if(j<0||j>=source.length)continue;
+        const w=d===0?3:Math.abs(d)===1?2:1;
+        sum+=source[j]*w;
+        weight+=w;
+      }
+      smooth[i]=sum/weight;
+    }
+    return smooth;
+  }
+
+  function comparisonData(result){
+    const counts=smoothedHistogram(result);
+    const ref=new Float32Array(result.bins);
+    const c=result.config;
+
+    for(let i=0;i<result.bins;i++){
+      const y=result.histMin+(i+0.5)/result.bins*(result.histMax-result.histMin);
+      const alpha=Math.PI*c.width*y/c.wavelength;
+      const beta=Math.PI*c.sep*y/c.wavelength;
+      const sinc=Math.abs(alpha)<1e-8?1:Math.sin(alpha)/alpha;
+      ref[i]=sinc*sinc*Math.cos(beta)*Math.cos(beta);
+    }
+
+    const maxS=Math.max(1,...counts);
+    const maxR=Math.max(1e-9,...ref);
+    let dot=0,aa=0,bb=0;
+    for(let i=0;i<counts.length;i++){
+      const a=counts[i]/maxS;
+      const b=ref[i]/maxR;
+      dot+=a*b;
+      aa+=a*a;
+      bb+=b*b;
+    }
+
+    return {
+      counts,
+      ref,
+      maxS,
+      maxR,
+      similarity:aa&&bb?dot/Math.sqrt(aa*bb):0
+    };
+  }
+
+  function drawScene(result){
+    const {w,h,dpr}=resize(scene,430);
+    const ctx=scene.getContext("2d");
+    const xpx=x=>(x+1.08)/2.18*w;
+    const ypx=y=>h/2-y/1.75*h;
+    const wall=xpx(0);
+    const detector=xpx(1);
+
+    ctx.clearRect(0,0,w,h);
+    ctx.lineCap="round";
+
+    ctx.strokeStyle="#d4d7dc";
+    ctx.lineWidth=dpr;
+    ctx.setLineDash([5*dpr,5*dpr]);
+    ctx.beginPath();
+    ctx.moveTo(detector,0);
+    ctx.lineTo(detector,h);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const c=result.config;
+    const t1=ypx(c.sep/2+c.width/2);
+    const b1=ypx(c.sep/2-c.width/2);
+    const t2=ypx(-c.sep/2+c.width/2);
+    const b2=ypx(-c.sep/2-c.width/2);
+
+    ctx.strokeStyle="#17191c";
+    ctx.lineWidth=5*dpr;
+    for(const [a,b] of [[0,t1],[b1,t2],[b2,h]]){
+      ctx.beginPath();
+      ctx.moveTo(wall,a);
+      ctx.lineTo(wall,b);
+      ctx.stroke();
+    }
+
+    ctx.strokeStyle="#2f8cff";
+    ctx.globalAlpha=0.28;
+    ctx.lineWidth=0.85*dpr;
+
+    for(let s=0;s<result.sampleCount;s++){
+      ctx.beginPath();
+      let started=false;
+      for(let f=0;f<result.frames;f++){
+        const idx=f*result.sampleCount+s;
+        const px=xpx(result.pathX[idx]);
+        const py=ypx(result.pathY[idx]);
+        if(!Number.isFinite(px)||!Number.isFinite(py))continue;
+        if(!started){
+          ctx.moveTo(px,py);
+          started=true;
+        }else{
+          ctx.lineTo(px,py);
+        }
+      }
+      ctx.stroke();
+    }
+
+    ctx.globalAlpha=1;
+    if(c.pointOrigin){
+      ctx.fillStyle="#17191c";
+      ctx.beginPath();
+      ctx.arc(xpx(-1),ypx(0),4*dpr,0,Math.PI*2);
+      ctx.fill();
+    }
+
+    ctx.fillStyle="#17191c";
+    ctx.font=`${12*dpr}px system-ui`;
+    ctx.fillText(c.pointOrigin?"point source":"extended source",8*dpr,18*dpr);
+    ctx.fillText("two-slit wall",wall+8*dpr,18*dpr);
+    ctx.fillText("screen",detector-48*dpr,18*dpr);
+  }
+
+  function drawHistogram(result){
+    const {w,h,dpr}=resize(hist,260);
+    const ctx=hist.getContext("2d");
+    const data=comparisonData(result);
+    const pad={l:40*dpr,r:14*dpr,t:14*dpr,b:28*dpr};
+    const pw=w-pad.l-pad.r;
+    const ph=h-pad.t-pad.b;
+
+    ctx.clearRect(0,0,w,h);
+
+    ctx.strokeStyle="#d4d7dc";
+    ctx.lineWidth=dpr;
+    ctx.beginPath();
+    ctx.moveTo(pad.l,pad.t);
+    ctx.lineTo(pad.l,pad.t+ph);
+    ctx.lineTo(pad.l+pw,pad.t+ph);
+    ctx.stroke();
+
+    ctx.strokeStyle="#2f8cff";
+    ctx.lineWidth=2*dpr;
+    ctx.beginPath();
+    data.counts.forEach((v,i)=>{
+      const x=pad.l+i/(data.counts.length-1)*pw;
+      const y=pad.t+ph-v/data.maxS*ph;
+      if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+
+    ctx.strokeStyle="#8b929b";
+    ctx.lineWidth=1.5*dpr;
+    ctx.setLineDash([6*dpr,5*dpr]);
+    ctx.beginPath();
+    data.ref.forEach((v,i)=>{
+      const x=pad.l+i/(data.ref.length-1)*pw;
+      const y=pad.t+ph-v/data.maxR*ph;
+      if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle="#6b7280";
+    ctx.font=`${11*dpr}px system-ui`;
+    ctx.fillText("-0.85",pad.l-6*dpr,h-8*dpr);
+    ctx.fillText("0",pad.l+pw/2-3*dpr,h-8*dpr);
+    ctx.fillText("+0.85",pad.l+pw-28*dpr,h-8*dpr);
+
+    $("similarityMetric").textContent=result.detected<8?"too few hits":Math.round(data.similarity*100)+"%";
+  }
+
+  function render(result){
+    drawScene(result);
+    drawHistogram(result);
+
+    $("detectedMetric").textContent=`${result.detected.toLocaleString()} / ${result.config.n.toLocaleString()}`;
+    $("blockedMetric").textContent=`${result.blocked.toLocaleString()} / ${result.config.n.toLocaleString()}`;
+    $("runtimeMetric").textContent=result.runtime<1000?`${Math.round(result.runtime)} ms`:`${(result.runtime/1000).toFixed(2)} s`;
+
+    const c=result.config;
+    const forceWord=c.strength<-.025?"repulsive":c.strength>.025?"attractive":"force-free";
+    const sourceMode=c.pointOrigin?"point source":"extended source";
+    const angleMode=c.equalTrajectories?"evenly spaced launch angles":"random launch angles";
+
+    $("status").textContent=
+      `Current run: ${c.n.toLocaleString()} particles, ${sourceMode}, ${angleMode}, `+
+      `${forceWord} density-field interaction. Only ${result.sampleCount} trajectories are drawn, `+
+      `but all particles contribute to the simulation and histogram.`;
+  }
+
+  function svgEscape(value){
+    return String(value).replace(/[&<>"]/g,char=>({
+      "&":"&amp;",
+      "<":"&lt;",
+      ">":"&gt;",
+      '"':"&quot;"
+    })[char]);
+  }
+
+  function makeSVG(result){
+    const W=1200,H=900;
+    const sceneX=60,sceneY=70,sceneW=1080,sceneH=500;
+    const histX=120,histY=650,histW=960,histH=180;
+    const xpx=x=>sceneX+(x+1.08)/2.18*sceneW;
+    const ypx=y=>sceneY+sceneH/2-y/1.75*sceneH;
+    const wall=xpx(0);
+    const detector=xpx(1);
+    const c=result.config;
+    const data=comparisonData(result);
+
+    const parts=[
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`,
+      `<style>
+        :root {
+          --background: #ffffff;
+          --panel: #f2f3f5;
+          --text: #17191c;
+          --muted: #6b7280;
+          --border: #d7dbe0;
+          --trajectory: #2f8cff;
+          --reference: #8b929b;
+        }
+
+        .background { fill: var(--background); }
+        .panel { fill: var(--panel); stroke: var(--border); stroke-width: 1; }
+        .wall { stroke: var(--text); stroke-width: 6; stroke-linecap: round; }
+        .screen { stroke: var(--border); stroke-width: 1; stroke-dasharray: 6 6; }
+        .trajectory {
+          fill: none;
+          stroke: var(--trajectory);
+          stroke-width: 1.2;
+          stroke-opacity: 0.30;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+        }
+        .source-point { fill: var(--text); }
+        .axis { fill: none; stroke: var(--border); stroke-width: 1; }
+        .histogram { fill: none; stroke: var(--trajectory); stroke-width: 3; }
+        .reference {
+          fill: none;
+          stroke: var(--reference);
+          stroke-width: 2;
+          stroke-dasharray: 7 7;
+        }
+        .title { fill: var(--text); font: 24px system-ui, sans-serif; }
+        .label { fill: var(--text); font: 15px system-ui, sans-serif; }
+        .metadata { fill: var(--muted); font: 14px system-ui, sans-serif; }
+      </style>`,
+      `<title>Interacting-Worlds Double-Slit Toy Model</title>`,
+      `<desc>Representative particle trajectories and detector histogram from a density-field double-slit simulation.</desc>`,
+      `<rect class="background" width="100%" height="100%"/>`,
+      `<text class="title" x="60" y="38">Interacting-Worlds Double-Slit Toy Model</text>`,
+      `<rect class="panel" x="${sceneX}" y="${sceneY}" width="${sceneW}" height="${sceneH}" rx="12"/>`,
+      `<line class="screen" x1="${detector}" y1="${sceneY}" x2="${detector}" y2="${sceneY+sceneH}"/>`
+    ];
+
+    const t1=ypx(c.sep/2+c.width/2);
+    const b1=ypx(c.sep/2-c.width/2);
+    const t2=ypx(-c.sep/2+c.width/2);
+    const b2=ypx(-c.sep/2-c.width/2);
+
+    for(const [a,b] of [[sceneY,t1],[b1,t2],[b2,sceneY+sceneH]]){
+      parts.push(`<line class="wall" x1="${wall}" y1="${a}" x2="${wall}" y2="${b}"/>`);
+    }
+
+    for(let s=0;s<result.sampleCount;s++){
+      const points=[];
+      for(let f=0;f<result.frames;f++){
+        const idx=f*result.sampleCount+s;
+        const px=xpx(result.pathX[idx]);
+        const py=ypx(result.pathY[idx]);
+        if(Number.isFinite(px)&&Number.isFinite(py))points.push(`${px.toFixed(1)},${py.toFixed(1)}`);
+      }
+      parts.push(`<polyline class="trajectory" points="${points.join(" ")}"/>`);
+    }
+
+    if(c.pointOrigin){
+      parts.push(`<circle class="source-point" cx="${xpx(-1)}" cy="${ypx(0)}" r="5"/>`);
+    }
+
+    parts.push(`<text class="label" x="${sceneX+10}" y="${sceneY+22}">${c.pointOrigin?"point source":"extended source"}</text>`);
+    parts.push(`<text class="label" x="${wall+10}" y="${sceneY+22}">two-slit wall</text>`);
+    parts.push(`<text class="label" x="${detector-55}" y="${sceneY+22}">screen</text>`);
+    parts.push(`<text class="title" x="60" y="625">Detector projection</text>`);
+    parts.push(`<path class="axis" d="M ${histX} ${histY} V ${histY+histH} H ${histX+histW}"/>`);
+
+    const simPoints=[];
+    const refPoints=[];
+    data.counts.forEach((v,i)=>{
+      const x=histX+i/(data.counts.length-1)*histW;
+      const y=histY+histH-v/data.maxS*histH;
+      simPoints.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+    });
+    data.ref.forEach((v,i)=>{
+      const x=histX+i/(data.ref.length-1)*histW;
+      const y=histY+histH-v/data.maxR*histH;
+      refPoints.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+    });
+
+    parts.push(`<polyline class="histogram" points="${simPoints.join(" ")}"/>`);
+    parts.push(`<polyline class="reference" points="${refPoints.join(" ")}"/>`);
+    parts.push(
+      `<text class="metadata" x="${histX}" y="870">`+
+      `${c.pointOrigin?"point source":"extended source"} · `+
+      `${c.equalTrajectories?"even angles":"random angles"} · `+
+      `${c.n.toLocaleString()} particles · force ${svgEscape(c.strength.toFixed(2))} · `+
+      `detected ${result.detected.toLocaleString()} · blocked ${result.blocked.toLocaleString()}`+
+      `</text>`
+    );
+    parts.push(`</svg>`);
+
+    return parts.join("\n");
+  }
+
+  function run(){
+    updateForceLabel();
+    runToken++;
+    $("run").disabled=true;
+    $("progress").hidden=false;
+    $("progress").value=0;
+    $("status").textContent="Calculating in a background worker…";
+
+    makeWorker();
+    worker.postMessage({
+      config:values(),
+      seed:seedValue,
+      token:runToken
+    });
+  }
+
+  $("run").addEventListener("click",run);
+
+  $("seed").addEventListener("click",()=>{
+    seedValue=(seedValue+0x9E3779B9)>>>0;
+    run();
+  });
+
+  $("downloadSvg").addEventListener("click",()=>{
+    if(!lastResult)return;
+    const blob=new Blob([makeSVG(lastResult)],{type:"image/svg+xml"});
+    const url=URL.createObjectURL(blob);
+    const anchor=document.createElement("a");
+    anchor.href=url;
+    anchor.download=`double-slit-${lastResult.config.n}-particles.svg`;
+    anchor.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  });
+
+  for(const id of [
+    "force","count","exponent","radius","softening","angularSpread",
+    "pointOrigin","equalTrajectories","separation","slitWidth","wavelength"
+  ]){
+    $(id).addEventListener("input",()=>{
+      if(id==="force")updateForceLabel();
+      clearTimeout(debounceTimer);
+      debounceTimer=setTimeout(run,350);
+    });
+  }
+
+  addEventListener("resize",()=>{
+    if(lastResult){
+      drawScene(lastResult);
+      drawHistogram(lastResult);
+    }
+  });
+
+  updateForceLabel();
+  run();
+})();
+</script>
+</body>
+</html>

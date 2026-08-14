@@ -1,0 +1,25 @@
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Editor and temporary files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs and local environment files
+*.log
+.env
+.env.*
+!.env.example
+
+# Common dependency and build output directories
+node_modules/
+coverage/
+dist/
+build/
+
+# Generated image-field exports
+exports/

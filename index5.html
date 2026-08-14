@@ -1,0 +1,815 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Interacting-Worlds Double-Slit Toy Model — Original Solver</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#fff; --canvas:#f2f3f5; --text:#17191c;
+    --muted:#687181; --border:#d7dce3; --accent:#2f8cff; --soft:#eef4ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+  main{max-width:1220px;margin:0 auto;padding:20px}
+  h1{font-size:24px;margin:0 0 14px}
+  h2{font-size:18px;margin:18px 0 8px}
+  .grid{display:grid;grid-template-columns:2fr 1fr;gap:14px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:14px}
+  .controls{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+  label{display:block;font-size:13px;color:var(--muted)}
+  input,select,button{font:inherit}
+  input[type=number],select{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:#fff;color:var(--text)}
+  input[type=range]{width:100%}
+  .row{display:flex;gap:8px;align-items:center}
+  .checks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px}
+  .check{display:flex;align-items:center;gap:8px;color:var(--text);font-size:14px}
+  button{border:1px solid var(--border);background:#fff;border-radius:10px;padding:9px 12px;cursor:pointer}
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  button:disabled{opacity:.55;cursor:wait}
+  .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0}
+  .metric{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:10px}
+  .metric b{display:block;font-size:22px;margin-top:3px}
+  canvas{display:block;width:100%;background:var(--canvas);border:1px solid var(--border);border-radius:12px}
+  #scene{height:460px}
+  #hist{height:260px}
+  .legend{font-size:13px;color:var(--muted)}
+  .note{margin-top:14px;background:var(--soft);border:1px solid #cfe0ff;border-radius:12px;padding:12px}
+  progress{width:100%;height:10px;margin-top:8px}
+  @media(max-width:950px){.grid{grid-template-columns:1fr}.controls{grid-template-columns:repeat(3,1fr)}}
+  @media(max-width:680px){main{padding:12px}.controls{grid-template-columns:repeat(2,1fr)}.metrics{grid-template-columns:repeat(2,1fr)}.checks{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Interacting-Worlds Double-Slit Toy Model</h1>
+
+  <div class="grid">
+    <section class="card">
+      <label>
+        <div class="row" style="justify-content:space-between">
+          <span>Inter-world force</span>
+          <strong id="forceReadout">0.00 · none</strong>
+        </div>
+        <input id="force" type="range" min="-2" max="2" value="0" step="any">
+      </label>
+      <div class="row" style="justify-content:space-between;color:var(--muted);font-size:12px">
+        <span>repulsion</span><span>no force</span><span>attraction</span>
+      </div>
+
+      <div class="controls" style="margin-top:12px">
+        <label>Particles<input id="count" type="number" min="100" max="150000" step="1000" value="1000"></label>
+        <label>Force exponent
+          <select id="exponent"><option value="1">1/r</option><option value="2" selected>1/r²</option><option value="3">1/r³</option></select>
+        </label>
+        <label>Interaction radius<input id="radius" type="number" min="0.02" max="0.5" step="0.01" value="0.18"></label>
+        <label>Softening<input id="softening" type="number" min="0.005" max="0.15" step="0.005" value="0.03"></label>
+        <label>Angular spread (degrees)<input id="angularSpread" type="number" min="1" max="60" step="1" value="26"></label>
+        <label>Time increment<input id="timeIncrement" type="number" min="0.00005" max="0.02" step="0.00005" value="0.006"></label>
+        <label>Blue opacity<input id="blueOpacity" type="number" min="0" max="1" step="0.01" value="0.18"></label>
+        <label>Grey opacity<input id="greyOpacity" type="number" min="0" max="1" step="0.01" value="0.08"></label>
+      </div>
+
+      <div class="checks">
+        <label class="check"><input id="pointOrigin" type="checkbox"><span>Point origin</span></label>
+        <label class="check"><input id="equalTrajectories" type="checkbox"><span>Evenly spaced launch angles</span></label>
+        <label class="check"><input id="forwardOnly" type="checkbox"><span>Prevent backwards beam</span></label>
+      </div>
+
+      <div style="margin-top:7px;color:var(--muted);font-size:12px">
+        This uses the original direct local-neighbour calculation. Large particle counts are genuinely expensive.
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="controls" style="grid-template-columns:1fr 1fr">
+        <label>Slit separation<input id="separation" type="number" min="0" max="0.7" step="0.02" value="0.32"></label>
+        <label>Slit width<input id="slitWidth" type="number" min="0.04" max="0.7" step="0.01" value="0.12"></label>
+        <label>Slit center (0–1)<input id="slitCenter" type="number" min="0" max="1" step="0.01" value="0.5"></label>
+        <label>Reference wavelength<input id="wavelength" type="number" min="0.015" max="0.2" step="0.005" value="0.055"></label>
+      </div>
+      <div class="row" style="margin-top:12px;flex-wrap:wrap">
+        <button id="run" class="primary">Run simulation</button>
+        <button id="cancel" disabled>Cancel simulation</button>
+        <button id="seed">New seed</button>
+        <button id="downloadSvg">Download SVG</button>
+      </div>
+      <progress id="progress" value="0" max="1" hidden></progress>
+    </section>
+  </div>
+
+  <div class="metrics">
+    <div class="metric"><span>Reached screen</span><b id="detectedMetric">—</b></div>
+    <div class="metric"><span>Stopped at wall</span><b id="blockedMetric">—</b></div>
+    <div class="metric"><span>Shape similarity</span><b id="similarityMetric">—</b></div>
+    <div class="metric"><span>Run time</span><b id="runtimeMetric">—</b></div>
+  </div>
+
+  <h2>Trajectories</h2>
+  <div class="legend">Every particle is drawn. The calculation is the original direct neighbour interaction, running inside a Web Worker.</div>
+  <canvas id="scene"></canvas>
+
+  <h2>Detector projection</h2>
+  <div class="legend">Blue: simulation · dashed grey: quantum-style reference</div>
+  <canvas id="hist"></canvas>
+
+  <div class="note" id="status">Ready.</div>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const $=id=>document.getElementById(id);
+  const scene=$("scene"),hist=$("hist");
+  let worker=null,lastResult=null,seedValue=123456789,runToken=0,debounceTimer=null;
+
+  const workerSource=String.raw`
+    "use strict";
+
+    function mulberry32(a){
+      return function(){
+        let t=a+=0x6D2B79F5;
+        t=Math.imul(t^t>>>15,t|1);
+        t^=t+Math.imul(t^t>>>7,t|61);
+        return((t^t>>>14)>>>0)/4294967296;
+      };
+    }
+
+    function gaussian(rng){
+      let u=0,v=0;
+      while(!u)u=rng();
+      while(!v)v=rng();
+      return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+    }
+
+    self.onmessage=e=>{
+      const {config:c,seed,token}=e.data;
+      const started=performance.now();
+      const rng=mulberry32(seed);
+
+      // The original solver used dt = 0.006 for 530 steps.
+      // Keep the same total simulated duration while allowing finer increments.
+      const dt=c.timeIncrement;
+      const totalDuration=0.006*530;
+      const steps=Math.max(1,Math.ceil(totalDuration/dt));
+      const forceScale=0.00012;
+      const maxA=18;
+      const maxSpeed=2.6;
+      const detectorX=1;
+      const wallX=0;
+      const n=c.n;
+
+      const x=new Float32Array(n);
+      const y=new Float32Array(n);
+      const vx=new Float32Array(n);
+      const vy=new Float32Array(n);
+      const stopped=new Uint8Array(n);
+      const detectedState=new Uint8Array(n);
+
+      for(let i=0;i<n;i++){
+        x[i]=c.pointOrigin ? -1 : -1+gaussian(rng)*0.008;
+        y[i]=c.pointOrigin ? 0 : gaussian(rng)*0.42;
+
+        if(c.pointOrigin || c.equalTrajectories){
+          let angle;
+          if(c.equalTrajectories){
+            const u=n===1?0.5:(i+0.5)/n;
+            angle=(u*2-1)*c.angularSpread;
+          }else{
+            angle=Math.max(-c.angularSpread,Math.min(c.angularSpread,gaussian(rng)*c.angularSpread*0.5));
+          }
+          const speed=c.equalTrajectories?1:Math.max(0.72,Math.min(1.28,1+gaussian(rng)*0.055));
+          vx[i]=speed*Math.cos(angle);
+          vy[i]=speed*Math.sin(angle);
+        }else{
+          // Exact original initial conditions.
+          vx[i]=Math.max(0.72,Math.min(1.28,1+gaussian(rng)*0.055));
+          vy[i]=gaussian(rng)*0.18;
+        }
+      }
+
+      // Base trajectory sample interval from the original solver: 7 * 0.006 seconds.
+      // Smaller physics increments therefore create more intermediate curve points.
+      // At high particle counts the sampling interval is increased to limit SVG size.
+      const countMultiplier=n<=5000?1:n<=20000?2:n<=60000?4:6;
+      const targetRecordTime=7*0.006*countMultiplier;
+      const recordEvery=Math.max(1,Math.round(targetRecordTime/dt));
+      const maxFrames=Math.ceil(steps/recordEvery)+3;
+      const pathX=new Float32Array(n*maxFrames);
+      const pathY=new Float32Array(n*maxFrames);
+      let frame=0;
+
+      function record(){
+        const base=frame*n;
+        pathX.set(x,base);
+        pathY.set(y,base);
+        frame++;
+      }
+      record();
+
+      const cellSize=c.radius;
+      const cutoff2=c.radius*c.radius;
+      const soft2=c.soft*c.soft;
+      const minX=-1.3,maxX=1.4,minY=-1.5,maxY=1.5;
+      const cols=Math.ceil((maxX-minX)/cellSize);
+      const rows=Math.ceil((maxY-minY)/cellSize);
+      const heads=new Int32Array(cols*rows);
+      const next=new Int32Array(n);
+      const ax=new Float32Array(n);
+      const ay=new Float32Array(n);
+
+      const bins=120;
+      const histogram=new Uint32Array(bins);
+      const histMin=-0.85,histMax=0.85,histScale=bins/(histMax-histMin);
+      let blocked=0,detected=0;
+
+      for(let step=0;step<steps;step++){
+        heads.fill(-1);
+
+        // Same spatial-neighbour indexing strategy as the first version.
+        for(let i=0;i<n;i++){
+          if(detectedState[i]){next[i]=-1;continue}
+          const gx=Math.floor((x[i]-minX)/cellSize);
+          const gy=Math.floor((y[i]-minY)/cellSize);
+          if(gx<0||gx>=cols||gy<0||gy>=rows){next[i]=-1;continue}
+          const cell=gy*cols+gx;
+          next[i]=heads[cell];
+          heads[cell]=i;
+        }
+
+        ax.fill(0);
+        ay.fill(0);
+
+        if(Math.abs(c.strength)>0.0001){
+          for(let i=0;i<n;i++){
+            if(stopped[i]||detectedState[i])continue;
+
+            const gx=Math.floor((x[i]-minX)/cellSize);
+            const gy=Math.floor((y[i]-minY)/cellSize);
+            let fx=0,fy=0;
+
+            for(let ox=-1;ox<=1;ox++){
+              for(let oy=-1;oy<=1;oy++){
+                const cx=gx+ox,cy=gy+oy;
+                if(cx<0||cx>=cols||cy<0||cy>=rows)continue;
+                let j=heads[cy*cols+cx];
+
+                while(j!==-1){
+                  if(i!==j){
+                    const dx=x[j]-x[i];
+                    const dy=y[j]-y[i];
+                    const r2=dx*dx+dy*dy;
+
+                    if(r2>1e-12&&r2<=cutoff2){
+                      const inv=1/Math.pow(r2+soft2,(c.exponent+1)/2);
+                      fx+=c.strength*forceScale*dx*inv;
+                      fy+=c.strength*forceScale*dy*inv;
+                    }
+                  }
+                  j=next[j];
+                }
+              }
+            }
+
+            const a=Math.hypot(fx,fy);
+            if(a>maxA){
+              fx*=maxA/a;
+              fy*=maxA/a;
+            }
+            ax[i]=fx;
+            ay[i]=fy;
+          }
+        }
+
+        for(let i=0;i<n;i++){
+          if(stopped[i]||detectedState[i])continue;
+
+          const oldX=x[i];
+          vx[i]+=ax[i]*dt;
+          vy[i]+=ay[i]*dt;
+
+          if(c.forwardOnly&&vx[i]<0.18)vx[i]=0.18;
+
+          const speed=Math.hypot(vx[i],vy[i]);
+          if(speed>maxSpeed){
+            vx[i]*=maxSpeed/speed;
+            vy[i]*=maxSpeed/speed;
+          }
+
+          x[i]+=vx[i]*dt;
+          y[i]+=vy[i]*dt;
+
+          if(oldX<wallX&&x[i]>=wallX){
+            const slitOffset=(0.5-c.slitCenter)*1.75;
+            const upper=Math.abs(y[i]-(slitOffset+c.sep/2))<=c.width/2;
+            const lower=Math.abs(y[i]-(slitOffset-c.sep/2))<=c.width/2;
+
+            if(!upper&&!lower){
+              x[i]=-0.002;
+              vx[i]=0;
+              vy[i]=0;
+              stopped[i]=1;
+              blocked++;
+            }
+          }
+
+          if(!stopped[i]&&oldX<detectorX&&x[i]>=detectorX){
+            detectedState[i]=1;
+            detected++;
+            const k=Math.floor((y[i]-histMin)*histScale);
+            if(k>=0&&k<bins)histogram[k]++;
+          }
+        }
+
+        if((step+1)%recordEvery===0)record();
+        if(step%8===0)self.postMessage({type:"progress",token,value:(step+1)/steps});
+      }
+
+      if(frame===0||frame*n<pathX.length)record();
+
+      self.postMessage({
+        type:"result",
+        token,
+        result:{
+          config:c,
+          blocked,
+          detected,
+          histogram,
+          bins,
+          histMin,
+          histMax,
+          n,
+          frames:frame,
+          pathX:pathX.subarray(0,frame*n),
+          pathY:pathY.subarray(0,frame*n),
+          stopped,
+          runtime:performance.now()-started,
+          recordEvery
+        }
+      },[
+        histogram.buffer,
+        pathX.buffer,
+        pathY.buffer,
+        stopped.buffer
+      ]);
+    };
+  `;
+
+  function makeWorker(){
+    if(worker)worker.terminate();
+    const url=URL.createObjectURL(new Blob([workerSource],{type:"text/javascript"}));
+    worker=new Worker(url);
+    URL.revokeObjectURL(url);
+
+    worker.onmessage=e=>{
+      const m=e.data;
+      if(m.token!==runToken)return;
+
+      if(m.type==="progress"){
+        $("progress").value=m.value;
+        return;
+      }
+
+      if(m.type==="result"){
+        lastResult=m.result;
+        render(lastResult);
+        $("run").disabled=false;
+        $("cancel").disabled=true;
+        $("progress").hidden=true;
+      }
+    };
+
+    worker.onerror=e=>{
+      $("status").textContent="Simulation failed: "+e.message;
+      $("run").disabled=false;
+      $("cancel").disabled=true;
+      $("progress").hidden=true;
+    };
+  }
+
+  function values(){
+    return{
+      strength:+$("force").value,
+      n:Math.max(100,Math.min(150000,+$("count").value||1000)),
+      exponent:+$("exponent").value,
+      radius:+$("radius").value,
+      soft:+$("softening").value,
+      sep:+$("separation").value,
+      width:+$("slitWidth").value,
+      slitCenter:Math.max(0,Math.min(1,+$("slitCenter").value||0.5)),
+      wavelength:+$("wavelength").value,
+      angularSpread:+$("angularSpread").value*Math.PI/180,
+      timeIncrement:Math.max(0.00005,Math.min(0.02,+$("timeIncrement").value||0.006)),
+      blueOpacity:Math.max(0,Math.min(1,+$("blueOpacity").value)),
+      greyOpacity:Math.max(0,Math.min(1,+$("greyOpacity").value)),
+      pointOrigin:$("pointOrigin").checked,
+      equalTrajectories:$("equalTrajectories").checked,
+      forwardOnly:$("forwardOnly").checked
+    };
+  }
+
+  function updateForceLabel(){
+    const v=+$("force").value;
+    const word=v<-.025?"repulsion":v>.025?"attraction":"none";
+    $("forceReadout").textContent=`${v.toFixed(2)} · ${word}`;
+  }
+
+  function resize(canvas,height){
+    const dpr=Math.min(2,devicePixelRatio||1);
+    const r=canvas.getBoundingClientRect();
+    canvas.width=Math.max(320,Math.round(r.width*dpr));
+    canvas.height=Math.round(height*dpr);
+    return{w:canvas.width,h:canvas.height,dpr};
+  }
+
+  function comparisonData(r){
+    const counts=new Float32Array(r.bins);
+    for(let i=0;i<r.bins;i++){
+      let s=0,w=0;
+      for(let d=-2;d<=2;d++){
+        const j=i+d;
+        if(j<0||j>=r.bins)continue;
+        const ww=d===0?3:Math.abs(d)===1?2:1;
+        s+=r.histogram[j]*ww;
+        w+=ww;
+      }
+      counts[i]=s/w;
+    }
+
+    const ref=new Float32Array(r.bins);
+    const c=r.config;
+    for(let i=0;i<r.bins;i++){
+      const y=r.histMin+(i+.5)/r.bins*(r.histMax-r.histMin);
+      const a=Math.PI*c.width*y/c.wavelength;
+      const b=Math.PI*c.sep*y/c.wavelength;
+      const sinc=Math.abs(a)<1e-8?1:Math.sin(a)/a;
+      ref[i]=sinc*sinc*Math.cos(b)*Math.cos(b);
+    }
+
+    const maxS=Math.max(1,...counts);
+    const maxR=Math.max(1e-9,...ref);
+    let dot=0,aa=0,bb=0;
+    for(let i=0;i<r.bins;i++){
+      const a=counts[i]/maxS,b=ref[i]/maxR;
+      dot+=a*b;aa+=a*a;bb+=b*b;
+    }
+
+    return{
+      counts,ref,maxS,maxR,
+      similarity:aa&&bb?dot/Math.sqrt(aa*bb):0
+    };
+  }
+
+  function slitOpenings(c){
+    const offset=(0.5-c.slitCenter)*1.75;
+    const intervals=[
+      [offset+c.sep/2-c.width/2, offset+c.sep/2+c.width/2],
+      [offset-c.sep/2-c.width/2, offset-c.sep/2+c.width/2]
+    ].sort((a,b)=>a[0]-b[0]);
+
+    if(intervals[1][0]<=intervals[0][1]){
+      return [[intervals[0][0],Math.max(intervals[0][1],intervals[1][1])]];
+    }
+    return intervals;
+  }
+
+  function wallSegments(c,minY,maxY){
+    const openings=slitOpenings(c);
+    const segments=[];
+    let cursor=minY;
+
+    for(const [start,end] of openings){
+      const a=Math.max(minY,start);
+      const b=Math.min(maxY,end);
+      if(a>cursor)segments.push([cursor,a]);
+      cursor=Math.max(cursor,b);
+    }
+
+    if(cursor<maxY)segments.push([cursor,maxY]);
+    return segments;
+  }
+
+  function drawScene(r){
+    const {w,h,dpr}=resize(scene,460);
+    const ctx=scene.getContext("2d");
+    const xpx=x=>(x+1.08)/2.18*w;
+    const ypx=y=>h/2-y/1.75*h;
+    const wall=xpx(0),det=xpx(1),c=r.config;
+
+    ctx.clearRect(0,0,w,h);
+    ctx.lineCap="round";
+
+    ctx.lineWidth=Math.max(0.45*dpr,0.9*dpr*Math.sqrt(1000/r.n));
+
+    // Draw blocked trajectories first in grey, then successful/moving ones in blue.
+    for(const blockedPass of [true,false]){
+      ctx.strokeStyle=blockedPass?"#8b929b":"#2f8cff";
+      ctx.globalAlpha=blockedPass?r.config.greyOpacity:r.config.blueOpacity;
+
+      for(let i=0;i<r.n;i++){
+        if(Boolean(r.stopped[i])!==blockedPass)continue;
+
+        ctx.beginPath();
+        let begun=false;
+
+        for(let f=0;f<r.frames;f++){
+          const idx=f*r.n+i;
+          const px=xpx(r.pathX[idx]);
+          const py=ypx(r.pathY[idx]);
+
+          if(!Number.isFinite(px)||!Number.isFinite(py))continue;
+          if(!begun){
+            ctx.moveTo(px,py);
+            begun=true;
+          }else{
+            ctx.lineTo(px,py);
+          }
+        }
+        ctx.stroke();
+      }
+    }
+
+    ctx.globalAlpha=1;
+
+    ctx.strokeStyle="#17191c";
+    ctx.lineWidth=5*dpr;
+    for(const [fromY,toY] of wallSegments(c,-0.875,0.875)){
+      ctx.beginPath();
+      ctx.moveTo(wall,ypx(toY));
+      ctx.lineTo(wall,ypx(fromY));
+      ctx.stroke();
+    }
+
+    ctx.strokeStyle="#d4d7dc";
+    ctx.lineWidth=dpr;
+    ctx.setLineDash([5*dpr,5*dpr]);
+    ctx.beginPath();
+    ctx.moveTo(det,0);
+    ctx.lineTo(det,h);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    if(c.pointOrigin){
+      ctx.fillStyle="#17191c";
+      ctx.beginPath();
+      ctx.arc(xpx(-1),ypx(0),4*dpr,0,Math.PI*2);
+      ctx.fill();
+    }
+
+    ctx.fillStyle="#17191c";
+    ctx.font=`${12*dpr}px system-ui`;
+    ctx.fillText(c.pointOrigin?"point source":"extended source",8*dpr,18*dpr);
+    ctx.fillText("two-slit wall",wall+8*dpr,18*dpr);
+    ctx.fillText("screen",det-48*dpr,18*dpr);
+  }
+
+  function drawHist(r){
+    const {w,h,dpr}=resize(hist,260);
+    const ctx=hist.getContext("2d");
+    const d=comparisonData(r);
+    const pad={l:40*dpr,r:14*dpr,t:14*dpr,b:28*dpr};
+    const pw=w-pad.l-pad.r,ph=h-pad.t-pad.b;
+
+    ctx.clearRect(0,0,w,h);
+    ctx.strokeStyle="#d4d7dc";
+    ctx.beginPath();
+    ctx.moveTo(pad.l,pad.t);
+    ctx.lineTo(pad.l,pad.t+ph);
+    ctx.lineTo(pad.l+pw,pad.t+ph);
+    ctx.stroke();
+
+    ctx.strokeStyle="#2f8cff";
+    ctx.lineWidth=2*dpr;
+    ctx.beginPath();
+    d.counts.forEach((v,i)=>{
+      const x=pad.l+i/(r.bins-1)*pw;
+      const y=pad.t+ph-v/d.maxS*ph;
+      i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+    });
+    ctx.stroke();
+
+    ctx.strokeStyle="#8b929b";
+    ctx.lineWidth=1.5*dpr;
+    ctx.setLineDash([6*dpr,5*dpr]);
+    ctx.beginPath();
+    d.ref.forEach((v,i)=>{
+      const x=pad.l+i/(r.bins-1)*pw;
+      const y=pad.t+ph-v/d.maxR*ph;
+      i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle="#6b7280";
+    ctx.font=`${11*dpr}px system-ui`;
+    ctx.fillText("-0.85",pad.l-6*dpr,h-8*dpr);
+    ctx.fillText("0",pad.l+pw/2-3*dpr,h-8*dpr);
+    ctx.fillText("+0.85",pad.l+pw-28*dpr,h-8*dpr);
+
+    $("similarityMetric").textContent=r.detected<8?"too few hits":Math.round(d.similarity*100)+"%";
+  }
+
+  function render(r){
+    drawScene(r);
+    drawHist(r);
+
+    $("detectedMetric").textContent=`${r.detected.toLocaleString()} / ${r.config.n.toLocaleString()}`;
+    $("blockedMetric").textContent=`${r.blocked.toLocaleString()} / ${r.config.n.toLocaleString()}`;
+    $("runtimeMetric").textContent=r.runtime<1000?`${Math.round(r.runtime)} ms`:`${(r.runtime/1000).toFixed(2)} s`;
+
+    const c=r.config;
+    const word=c.strength<-.025?"repulsive":c.strength>.025?"attractive":"force-free";
+    $("status").textContent=
+      `Original solver: ${c.n.toLocaleString()} particles, ${word} local pair interaction, `+
+      `all particles rendered as vector-style paths. Time increment ${c.timeIncrement.toFixed(5)}; `+
+      `path samples every ${r.recordEvery} simulation steps.`;
+  }
+
+  function makeSVG(r){
+    // Art-only export: trajectories, nothing else.
+    // Coordinates match the live simulation view and remain fully vector.
+    const W=1200;
+    const H=700;
+    const xpx=x=>(x+1.08)/2.18*W;
+    const ypx=y=>H/2-y/1.75*H;
+
+    const blueOpacity=r.config.blueOpacity;
+    const greyOpacity=r.config.greyOpacity;
+    const strokeWidth=Math.max(0.35,0.9*Math.sqrt(1000/r.n));
+
+    const parts=[
+`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`,
+`<style>
+  /* Simulation time increment: ${r.config.timeIncrement.toFixed(5)} */
+  :root {
+    --background: #ffffff;
+    --trajectory: #2f8cff;
+    --blocked-trajectory: #8b929b;
+    --trajectory-opacity: ${blueOpacity.toFixed(4)};
+    --blocked-trajectory-opacity: ${greyOpacity.toFixed(4)};
+    --trajectory-width: ${strokeWidth.toFixed(3)};
+  }
+
+  .background {
+    fill: var(--background);
+  }
+
+  .trajectory {
+    fill: none;
+    stroke: var(--trajectory);
+    stroke-width: var(--trajectory-width);
+    stroke-opacity: var(--trajectory-opacity);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .blocked-trajectory {
+    stroke: var(--blocked-trajectory);
+    stroke-opacity: var(--blocked-trajectory-opacity);
+  }
+
+  .wall {
+    fill: none;
+    stroke: var(--wall, #17191c);
+    stroke-width: var(--wall-width, 6);
+    stroke-linecap: round;
+  }
+</style>`,
+`<rect class="background" width="100%" height="100%"/>`,
+`<g id="trajectories">`
+    ];
+
+    for(let i=0;i<r.n;i++){
+      const points=[];
+
+      for(let f=0;f<r.frames;f++){
+        const idx=f*r.n+i;
+        const px=xpx(r.pathX[idx]);
+        const py=ypx(r.pathY[idx]);
+
+        if(Number.isFinite(px)&&Number.isFinite(py)){
+          points.push(`${px.toFixed(1)},${py.toFixed(1)}`);
+        }
+      }
+
+      const trajectoryClass=r.stopped[i]?"trajectory blocked-trajectory":"trajectory";
+      parts.push(`<polyline class="${trajectoryClass}" points="${points.join(" ")}"/>`);
+    }
+
+    parts.push(`</g>`);
+
+    const wallX=xpx(0);
+
+    parts.push(`<g id="wall">`);
+    for(const [fromY,toY] of wallSegments(r.config,-0.875,0.875)){
+      parts.push(
+        `<line class="wall" x1="${wallX}" y1="${ypx(toY)}" `+
+        `x2="${wallX}" y2="${ypx(fromY)}"/>`
+      );
+    }
+    parts.push(`</g>`);
+
+    parts.push(`</svg>`);
+
+    return parts.join("\n");
+  }
+
+  function run(){
+    updateForceLabel();
+    runToken++;
+    $("run").disabled=true;
+    $("cancel").disabled=false;
+    $("progress").hidden=false;
+    $("progress").value=0;
+    $("status").textContent="Calculating with the original direct-neighbour solver…";
+
+    makeWorker();
+    worker.postMessage({
+      config:values(),
+      seed:seedValue,
+      token:runToken
+    });
+  }
+
+  $("run").addEventListener("click",run);
+
+  $("cancel").addEventListener("click",()=>{
+    if(worker){
+      worker.terminate();
+      worker=null;
+    }
+
+    // Invalidate any late messages from the cancelled worker.
+    runToken++;
+
+    $("run").disabled=false;
+    $("cancel").disabled=true;
+    $("progress").hidden=true;
+    $("progress").value=0;
+    $("status").textContent="Simulation cancelled. The last completed result remains displayed.";
+  });
+
+  $("seed").addEventListener("click",()=>{
+    seedValue=(seedValue+0x9E3779B9)>>>0;
+    run();
+  });
+
+  $("downloadSvg").addEventListener("click",()=>{
+    if(!lastResult)return;
+
+    $("status").textContent="Building vector SVG… large particle counts may take a while.";
+    setTimeout(()=>{
+      const svg=makeSVG(lastResult);
+      const url=URL.createObjectURL(new Blob([svg],{type:"image/svg+xml"}));
+      const a=document.createElement("a");
+      a.href=url;
+      a.download=`double-slit-art-${lastResult.config.n}-particles.svg`;
+      a.click();
+      setTimeout(()=>URL.revokeObjectURL(url),2000);
+      $("status").textContent=`Art-only SVG exported with ${lastResult.n.toLocaleString()} editable vector trajectories.`;
+    },20);
+  });
+
+  for(const id of [
+    "force","count","exponent","radius","softening","angularSpread","timeIncrement",
+    "pointOrigin","equalTrajectories","forwardOnly",
+    "separation","slitWidth","slitCenter","wavelength"
+  ]){
+    $(id).addEventListener("input",()=>{
+      if(id==="force")updateForceLabel();
+      clearTimeout(debounceTimer);
+      debounceTimer=setTimeout(run,450);
+    });
+  }
+
+  function updateOpacityOnly(){
+    if(!lastResult)return;
+
+    lastResult.config.blueOpacity=
+      Math.max(0,Math.min(1,+$("blueOpacity").value));
+
+    lastResult.config.greyOpacity=
+      Math.max(0,Math.min(1,+$("greyOpacity").value));
+
+    drawScene(lastResult);
+    $("status").textContent=
+      `Opacity updated without rerunning the simulation. Blue ${lastResult.config.blueOpacity.toFixed(2)}, `+
+      `grey ${lastResult.config.greyOpacity.toFixed(2)}.`;
+  }
+
+  $("blueOpacity").addEventListener("input",updateOpacityOnly);
+  $("greyOpacity").addEventListener("input",updateOpacityOnly);
+
+  addEventListener("resize",()=>{
+    if(lastResult){
+      drawScene(lastResult);
+      drawHist(lastResult);
+    }
+  });
+
+  updateForceLabel();
+  run();
+})();
+</script>
+</body>
+</html>

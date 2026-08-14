@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Interacting-Worlds Double-Slit Toy Model</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#fff; --text:#17191c; --muted:#6b7280;
+    --border:#d7dbe0; --accent:#2f8cff; --soft:#eef4ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  main{max-width:1200px;margin:0 auto;padding:20px}
+  h1{font-size:24px;margin:0 0 14px}
+  h2{font-size:18px;margin:18px 0 8px}
+  .grid{display:grid;grid-template-columns:2fr 1fr;gap:14px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:14px}
+  .controls{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+  label{display:block;font-size:13px;color:var(--muted)}
+  input,select,button{font:inherit}
+  input[type=number],select{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:#fff;color:var(--text)}
+  input[type=range]{width:100%}
+  .row{display:flex;gap:8px;align-items:center}
+  button{border:1px solid var(--border);background:#fff;border-radius:10px;padding:9px 12px;cursor:pointer}
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  button:disabled{opacity:.55;cursor:wait}
+  .metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:14px 0}
+  .metric{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:10px}
+  .metric b{display:block;font-size:22px;margin-top:3px}
+  canvas{display:block;width:100%;background:#f2f3f5;border:1px solid var(--border);border-radius:12px}
+  #scene{height:430px}
+  #hist{height:260px}
+  .legend{font-size:13px;color:var(--muted)}
+  .note{margin-top:14px;background:var(--soft);border:1px solid #cfe0ff;border-radius:12px;padding:12px}
+  @media(max-width:850px){.grid{grid-template-columns:1fr}.controls{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Interacting-Worlds Double-Slit Toy Model</h1>
+
+  <div class="grid">
+    <section class="card">
+      <label>
+        <div class="row" style="justify-content:space-between">
+          <span>Inter-world force</span>
+          <strong id="forceReadout">0.00 · none</strong>
+        </div>
+        <input id="force" type="range" min="-2" max="2" value="0" step="0.05">
+      </label>
+      <div class="row" style="justify-content:space-between;color:var(--muted);font-size:12px">
+        <span>repulsion</span><span>no force</span><span>attraction</span>
+      </div>
+
+      <div class="controls" style="margin-top:12px">
+        <label>Particles<input id="count" type="number" min="100" max="100000" step="100" value="700"></label>
+        <label>Force exponent
+          <select id="exponent"><option value="1">1/r</option><option value="2" selected>1/r²</option><option value="3">1/r³</option></select>
+        </label>
+        <label>Interaction radius<input id="radius" type="number" min="0.04" max="0.5" step="0.01" value="0.18"></label>
+        <label>Softening<input id="softening" type="number" min="0.005" max="0.15" step="0.005" value="0.03"></label>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="controls" style="grid-template-columns:1fr 1fr">
+        <label>Slit separation<input id="separation" type="number" min="0.12" max="0.7" step="0.02" value="0.32"></label>
+        <label>Slit width<input id="slitWidth" type="number" min="0.04" max="0.28" step="0.01" value="0.12"></label>
+        <label style="grid-column:1/-1">Reference wavelength<input id="wavelength" type="number" min="0.015" max="0.2" step="0.005" value="0.055"></label>
+      </div>
+      <div class="row" style="margin-top:12px;flex-wrap:wrap">
+        <button id="run" class="primary">Run simulation</button>
+        <button id="seed">New seed</button>
+        <button id="downloadSvg">Download SVG</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="metrics">
+    <div class="metric"><span>Reached screen</span><b id="detectedMetric">—</b></div>
+    <div class="metric"><span>Stopped at wall</span><b id="blockedMetric">—</b></div>
+    <div class="metric"><span>Shape similarity</span><b id="similarityMetric">—</b></div>
+  </div>
+
+  <h2>Trajectories</h2>
+  <div class="legend">Wall at centre · blocked particles remain as force sources</div>
+  <canvas id="scene"></canvas>
+
+  <h2>Detector projection</h2>
+  <div class="legend">Blue: simulation · dashed grey: quantum-style reference</div>
+  <canvas id="hist"></canvas>
+
+  <div class="note" id="status">
+    This is a classical toy model. “World distance” is approximated by ordinary 2-D particle distance.
+  </div>
+</main>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const scene = $("scene"), hist = $("hist");
+  let seedValue = 123456789, lastResult = null, debounceTimer = null;
+
+  const values = () => ({
+    strength:+$("force").value,
+    n:Math.max(100,Math.min(100000,+$("count").value||700)),
+    exponent:+$("exponent").value,
+    radius:+$("radius").value,
+    soft:+$("softening").value,
+    sep:+$("separation").value,
+    width:+$("slitWidth").value,
+    wavelength:+$("wavelength").value
+  });
+
+  function mulberry32(a){return function(){let t=a+=0x6D2B79F5;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296}}
+  function gaussian(rng){let u=0,v=0;while(!u)u=rng();while(!v)v=rng();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v)}
+
+  function resize(c,hCss){
+    const dpr=Math.min(2,devicePixelRatio||1), r=c.getBoundingClientRect();
+    c.width=Math.round(r.width*dpr); c.height=Math.round(hCss*dpr);
+    return {w:c.width,h:c.height,dpr};
+  }
+
+  function updateForceLabel(){
+    const v=+$("force").value, word=v<-.025?"repulsion":v>.025?"attraction":"none";
+    $("forceReadout").textContent=`${v.toFixed(2)} · ${word}`;
+  }
+
+  function simulate(){
+    const c=values(), rng=mulberry32(seedValue), dt=.006, steps=530, forceScale=.00012;
+    const particles=[];
+    for(let i=0;i<c.n;i++){
+      const x=-1+gaussian(rng)*.008, y=gaussian(rng)*.42;
+      particles.push({x,y,vx:Math.max(.72,Math.min(1.28,1+gaussian(rng)*.055)),vy:gaussian(rng)*.18,stopped:false,detected:false,path:[{x,y}]});
+    }
+    const detectedY=[]; let blocked=0;
+    const cutoff2=c.radius*c.radius, soft2=c.soft*c.soft, cellSize=c.radius, maxA=18,maxSpeed=2.6;
+
+    for(let step=0;step<steps;step++){
+      const grid=new Map();
+      for(let i=0;i<particles.length;i++){
+        const p=particles[i]; if(p.detected)continue;
+        const gx=Math.floor(p.x/cellSize),gy=Math.floor(p.y/cellSize),key=gx+","+gy;
+        if(!grid.has(key))grid.set(key,[]); grid.get(key).push(i);
+      }
+      const accel=Array.from({length:particles.length},()=>[0,0]);
+
+      if(Math.abs(c.strength)>.0001){
+        for(let i=0;i<particles.length;i++){
+          const p=particles[i]; if(p.stopped||p.detected)continue;
+          const gx=Math.floor(p.x/cellSize),gy=Math.floor(p.y/cellSize);
+          let ax=0,ay=0;
+          for(let ox=-1;ox<=1;ox++)for(let oy=-1;oy<=1;oy++){
+            const list=grid.get((gx+ox)+","+(gy+oy)); if(!list)continue;
+            for(const j of list){
+              if(i===j)continue; const q=particles[j],dx=q.x-p.x,dy=q.y-p.y,r2=dx*dx+dy*dy;
+              if(r2<=1e-12||r2>cutoff2)continue;
+              const inv=1/Math.pow(r2+soft2,(c.exponent+1)/2);
+              ax+=c.strength*forceScale*dx*inv; ay+=c.strength*forceScale*dy*inv;
+            }
+          }
+          const a=Math.hypot(ax,ay); if(a>maxA){ax*=maxA/a;ay*=maxA/a}
+          accel[i][0]=ax; accel[i][1]=ay;
+        }
+      }
+
+      for(let i=0;i<particles.length;i++){
+        const p=particles[i]; if(p.stopped||p.detected)continue;
+        const oldX=p.x;
+        p.vx+=accel[i][0]*dt; p.vy+=accel[i][1]*dt;
+        const speed=Math.hypot(p.vx,p.vy); if(speed>maxSpeed){p.vx*=maxSpeed/speed;p.vy*=maxSpeed/speed}
+        p.x+=p.vx*dt; p.y+=p.vy*dt;
+
+        if(oldX<0&&p.x>=0){
+          const a=Math.abs(p.y-c.sep/2)<=c.width/2, b=Math.abs(p.y+c.sep/2)<=c.width/2;
+          if(!a&&!b){p.x=-.002;p.vx=0;p.vy=0;p.stopped=true;blocked++}
+        }
+        if(!p.stopped&&oldX<1&&p.x>=1){p.detected=true;detectedY.push(p.y)}
+        if(step%7===0||p.stopped||p.detected)p.path.push({x:p.x,y:p.y});
+      }
+    }
+    return {particles,detectedY,blocked,c};
+  }
+
+  function histogramData(result,bins=72){
+    const minY=-.85,maxY=.85,counts=Array(bins).fill(0);
+    for(const y of result.detectedY){const k=Math.floor((y-minY)/(maxY-minY)*bins);if(k>=0&&k<bins)counts[k]++}
+    const smooth=counts.map((_,i)=>{let s=0,w=0;for(let d=-2;d<=2;d++){const j=i+d;if(j<0||j>=bins)continue;const ww=d===0?3:Math.abs(d)===1?2:1;s+=counts[j]*ww;w+=ww}return s/w});
+    const ref=Array(bins),L=1;
+    for(let i=0;i<bins;i++){
+      const y=minY+(i+.5)/bins*(maxY-minY),alpha=Math.PI*result.c.width*y/(result.c.wavelength*L),beta=Math.PI*result.c.sep*y/(result.c.wavelength*L);
+      const sinc=Math.abs(alpha)<1e-8?1:Math.sin(alpha)/alpha; ref[i]=sinc*sinc*Math.cos(beta)*Math.cos(beta);
+    }
+    const maxS=Math.max(1,...smooth),maxR=Math.max(1e-9,...ref),sn=smooth.map(v=>v/maxS),rn=ref.map(v=>v/maxR);
+    let dot=0,aa=0,bb=0;for(let i=0;i<bins;i++){dot+=sn[i]*rn[i];aa+=sn[i]*sn[i];bb+=rn[i]*rn[i]}
+    return {counts:smooth,ref,minY,maxY,similarity:aa&&bb?dot/Math.sqrt(aa*bb):0};
+  }
+
+  function drawScene(result){
+    const {w,h,dpr}=resize(scene,430),ctx=scene.getContext("2d");
+    const xpx=x=>(x+1.08)/2.18*w, ypx=y=>h/2-y/1.75*h, wall=xpx(0),det=xpx(1);
+    ctx.clearRect(0,0,w,h);ctx.lineCap="round";
+    ctx.strokeStyle="#d4d7dc";ctx.setLineDash([5*dpr,5*dpr]);ctx.beginPath();ctx.moveTo(det,0);ctx.lineTo(det,h);ctx.stroke();ctx.setLineDash([]);
+    const t1=ypx(result.c.sep/2+result.c.width/2),b1=ypx(result.c.sep/2-result.c.width/2),t2=ypx(-result.c.sep/2+result.c.width/2),b2=ypx(-result.c.sep/2-result.c.width/2);
+    ctx.strokeStyle="#17191c";ctx.lineWidth=5*dpr;for(const [a,b] of [[0,t1],[b1,t2],[b2,h]]){ctx.beginPath();ctx.moveTo(wall,a);ctx.lineTo(wall,b);ctx.stroke()}
+    const stride=Math.max(1,Math.ceil(result.particles.length/260));
+    for(let i=0;i<result.particles.length;i+=stride){
+      const q=result.particles[i]; if(q.path.length<2)continue;
+      ctx.strokeStyle=q.detected?"#2f8cff":q.stopped?"#8b929b":"#5f9fff";ctx.globalAlpha=q.detected?.42:q.stopped?.14:.22;ctx.lineWidth=.9*dpr;ctx.beginPath();
+      q.path.forEach((pt,j)=>{const x=xpx(pt.x),y=ypx(pt.y);j?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke();
+    }
+    ctx.globalAlpha=1;ctx.fillStyle="#17191c";ctx.font=`${12*dpr}px system-ui`;ctx.fillText("source",8*dpr,18*dpr);ctx.fillText("two-slit wall",wall+8*dpr,18*dpr);ctx.fillText("screen",det-48*dpr,18*dpr);
+  }
+
+  function drawHist(result){
+    const {w,h,dpr}=resize(hist,260),ctx=hist.getContext("2d"),data=histogramData(result),pad={l:40*dpr,r:14*dpr,t:14*dpr,b:28*dpr},pw=w-pad.l-pad.r,ph=h-pad.t-pad.b;
+    ctx.clearRect(0,0,w,h);const mc=Math.max(1,...data.counts),mr=Math.max(1e-9,...data.ref);
+    ctx.strokeStyle="#d4d7dc";ctx.beginPath();ctx.moveTo(pad.l,pad.t);ctx.lineTo(pad.l,pad.t+ph);ctx.lineTo(pad.l+pw,pad.t+ph);ctx.stroke();
+    ctx.strokeStyle="#2f8cff";ctx.lineWidth=2*dpr;ctx.beginPath();data.counts.forEach((v,i)=>{const x=pad.l+i/(data.counts.length-1)*pw,y=pad.t+ph-v/mc*ph;i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke();
+    ctx.strokeStyle="#8b929b";ctx.lineWidth=1.5*dpr;ctx.setLineDash([6*dpr,5*dpr]);ctx.beginPath();data.ref.forEach((v,i)=>{const x=pad.l+i/(data.ref.length-1)*pw,y=pad.t+ph-v/mr*ph;i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle="#6b7280";ctx.font=`${11*dpr}px system-ui`;ctx.fillText("-0.85",pad.l-6*dpr,h-8*dpr);ctx.fillText("0",pad.l+pw/2-3*dpr,h-8*dpr);ctx.fillText("+0.85",pad.l+pw-28*dpr,h-8*dpr);
+    $("similarityMetric").textContent=result.detectedY.length<8?"too few hits":Math.round(data.similarity*100)+"%";
+  }
+
+  function render(result){
+    lastResult=result;drawScene(result);drawHist(result);
+    $("detectedMetric").textContent=`${result.detectedY.length} / ${result.c.n}`;
+    $("blockedMetric").textContent=`${result.blocked} / ${result.c.n}`;
+    const word=result.c.strength<-.025?"repulsive":result.c.strength>.025?"attractive":"force-free";
+    $("status").textContent=`Current run: ${word} 1/r${result.c.exponent===1?"":result.c.exponent===2?"²":"³"} interaction. The similarity score compares only normalised detector shape.`;
+  }
+
+  function svgEscape(s){return String(s).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]))}
+
+  function makeSVG(result){
+    const W=1200,H=900,sceneX=60,sceneY=70,sceneW=1080,sceneH=500,histX=120,histY=650,histW=960,histH=180;
+    const xpx=x=>sceneX+(x+1.08)/2.18*sceneW,ypx=y=>sceneY+sceneH/2-y/1.75*sceneH,wall=xpx(0),det=xpx(1);
+    const d=histogramData(result),mc=Math.max(1,...d.counts),mr=Math.max(1e-9,...d.ref);
+    const parts=[`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`,
+      `<rect width="100%" height="100%" fill="#ffffff"/>`,
+      `<text x="60" y="38" font-family="system-ui" font-size="24" fill="#17191c">Interacting-Worlds Double-Slit Toy Model</text>`,
+      `<rect x="${sceneX}" y="${sceneY}" width="${sceneW}" height="${sceneH}" rx="12" fill="#f2f3f5" stroke="#d7dbe0"/>`
+    ];
+    parts.push(`<line x1="${det}" y1="${sceneY}" x2="${det}" y2="${sceneY+sceneH}" stroke="#cfd3d8" stroke-dasharray="6 6"/>`);
+    const t1=ypx(result.c.sep/2+result.c.width/2),b1=ypx(result.c.sep/2-result.c.width/2),t2=ypx(-result.c.sep/2+result.c.width/2),b2=ypx(-result.c.sep/2-result.c.width/2);
+    for(const [a,b] of [[sceneY,t1],[b1,t2],[b2,sceneY+sceneH]])parts.push(`<line x1="${wall}" y1="${a}" x2="${wall}" y2="${b}" stroke="#17191c" stroke-width="6"/>`);
+    const stride=Math.max(1,Math.ceil(result.particles.length/350));
+    for(let i=0;i<result.particles.length;i+=stride){
+      const q=result.particles[i];if(q.path.length<2)continue;
+      const pts=q.path.map(pt=>`${xpx(pt.x).toFixed(1)},${ypx(pt.y).toFixed(1)}`).join(" ");
+      const col=q.detected?"#2f8cff":q.stopped?"#8b929b":"#5f9fff",op=q.detected?.42:q.stopped?.14:.22;
+      parts.push(`<polyline points="${pts}" fill="none" stroke="${col}" stroke-opacity="${op}" stroke-width="1.2" stroke-linecap="round"/>`);
+    }
+    parts.push(`<text x="${sceneX+10}" y="${sceneY+22}" font-family="system-ui" font-size="15">source</text>`);
+    parts.push(`<text x="${wall+10}" y="${sceneY+22}" font-family="system-ui" font-size="15">two-slit wall</text>`);
+    parts.push(`<text x="${det-55}" y="${sceneY+22}" font-family="system-ui" font-size="15">screen</text>`);
+    parts.push(`<text x="60" y="625" font-family="system-ui" font-size="22">Detector projection</text>`);
+    parts.push(`<line x1="${histX}" y1="${histY}" x2="${histX}" y2="${histY+histH}" stroke="#d7dbe0"/><line x1="${histX}" y1="${histY+histH}" x2="${histX+histW}" y2="${histY+histH}" stroke="#d7dbe0"/>`);
+    let sim="",ref="";
+    d.counts.forEach((v,i)=>{const x=histX+i/(d.counts.length-1)*histW,y=histY+histH-v/mc*histH;sim+=(i?" ":"")+x.toFixed(1)+","+y.toFixed(1)});
+    d.ref.forEach((v,i)=>{const x=histX+i/(d.ref.length-1)*histW,y=histY+histH-v/mr*histH;ref+=(i?" ":"")+x.toFixed(1)+","+y.toFixed(1)});
+    parts.push(`<polyline points="${sim}" fill="none" stroke="#2f8cff" stroke-width="3"/>`);
+    parts.push(`<polyline points="${ref}" fill="none" stroke="#8b929b" stroke-width="2" stroke-dasharray="7 7"/>`);
+    parts.push(`<text x="${histX}" y="870" font-family="system-ui" font-size="14" fill="#6b7280">force ${svgEscape(result.c.strength.toFixed(2))} · detected ${result.detectedY.length}/${result.c.n} · blocked ${result.blocked}/${result.c.n}</text>`);
+    parts.push(`</svg>`);
+    return parts.join("");
+  }
+
+  function run(){
+    updateForceLabel();$("run").disabled=true;$("status").textContent="Calculating trajectories…";
+    setTimeout(()=>{try{render(simulate())}catch(e){$("status").textContent="Simulation failed: "+e.message}finally{$("run").disabled=false}},20);
+  }
+
+  $("run").addEventListener("click",run);
+  $("seed").addEventListener("click",()=>{seedValue=(seedValue+0x9E3779B9)>>>0;run()});
+  $("downloadSvg").addEventListener("click",()=>{
+    if(!lastResult)return;
+    const blob=new Blob([makeSVG(lastResult)],{type:"image/svg+xml"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="double-slit-result.svg";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  });
+  for(const id of ["force","count","exponent","radius","softening","separation","slitWidth","wavelength"]){
+    $(id).addEventListener("input",()=>{if(id==="force")updateForceLabel();clearTimeout(debounceTimer);debounceTimer=setTimeout(run,300)});
+  }
+  addEventListener("resize",()=>{if(lastResult){drawScene(lastResult);drawHist(lastResult)}});
+  updateForceLabel();run();
+})();
+</script>
+</body>
+</html>
