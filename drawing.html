@@ -99,6 +99,7 @@
       gap: 10px;
       margin-top: 10px;
     }
+    .row.single { grid-template-columns: 1fr; }
     button {
       border: 1px solid var(--border);
       background: var(--panel2);
@@ -148,12 +149,6 @@
       color: var(--muted);
       font-size: 12px;
       text-align: center;
-    }
-    .hint {
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.45;
-      margin-top: 10px;
     }
     @media (max-width: 760px) {
       .app { grid-template-columns: 1fr; }
@@ -294,14 +289,14 @@
         <button id="run" class="primary" disabled>Run simulation</button>
         <button id="cancel" class="danger" disabled>Cancel</button>
       </div>
-      <div class="row">
+      <div class="row single">
         <button id="export" disabled>Export SVG</button>
-        <button id="clear">Clear</button>
+      </div>
+      <div class="row">
+        <input id="exportSize" type="number" min="1" step="1" value="1000" inputmode="numeric" aria-label="PNG large dimension in pixels" />
+        <button id="exportPng" disabled>Export PNG</button>
       </div>
       <div id="status" class="status" aria-live="polite">Upload an image to begin.</div>
-      <div class="hint">
-        Negative values repel; positive values attract. The three fields are combined as directional forces. Export uses the current canvas dimensions and line paths.
-      </div>
     </div>
   </aside>
 
@@ -324,7 +319,8 @@
   const runBtn = el('run');
   const cancelBtn = el('cancel');
   const exportBtn = el('export');
-  const clearBtn = el('clear');
+  const exportPngBtn = el('exportPng');
+  const exportSizeInput = el('exportSize');
   const statusEl = el('status');
   const autoRun = el('autoRun');
   let autoRunTimer = null;
@@ -422,6 +418,7 @@
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     paths = [];
     exportBtn.disabled = true;
+    exportPngBtn.disabled = true;
   }
   clearCanvas();
 
@@ -434,6 +431,7 @@
     canvas.width = width;
     canvas.height = height;
     canvasWrap.style.setProperty('--canvas-aspect', `${width} / ${height}`);
+    exportSizeInput.value = Math.max(img.naturalWidth, img.naturalHeight);
     clearCanvas();
     fitCanvasToAvailableSpace();
   }
@@ -813,6 +811,7 @@
     ctx.globalAlpha = 1;
     paths = allPaths;
     exportBtn.disabled = paths.length === 0;
+    exportPngBtn.disabled = paths.length === 0;
   }
 
   function startSimulation() {
@@ -825,6 +824,7 @@
     runBtn.disabled = true;
     cancelBtn.disabled = false;
     exportBtn.disabled = true;
+    exportPngBtn.disabled = true;
     statusEl.textContent = 'Preparing image fields…';
 
     worker.onmessage = e => {
@@ -899,17 +899,6 @@
     }
   });
 
-  clearBtn.addEventListener('click', () => {
-    if (worker) {
-      worker.terminate();
-      worker = null;
-    }
-    runBtn.disabled = !imageDataPayload;
-    cancelBtn.disabled = true;
-    clearCanvas();
-    statusEl.textContent = imageDataPayload ? 'Canvas cleared.' : 'Upload an image to begin.';
-  });
-
   exportBtn.addEventListener('click', () => {
     if (!paths.length) return;
 
@@ -958,6 +947,55 @@
     a.download = 'image-field-lines.svg';
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+
+  exportPngBtn.addEventListener('click', () => {
+    if (!paths.length) return;
+
+    const requestedSize = Number(exportSizeInput.value);
+    if (!Number.isFinite(requestedSize) || requestedSize < 1) {
+      statusEl.textContent = 'Enter a valid PNG size.';
+      return;
+    }
+    const longDimension = Math.max(1, Math.round(requestedSize));
+
+    const scale = longDimension / Math.max(canvas.width, canvas.height);
+    const output = document.createElement('canvas');
+    output.width = Math.max(1, Math.round(canvas.width * scale));
+    output.height = Math.max(1, Math.round(canvas.height * scale));
+    const outputCtx = output.getContext('2d');
+
+    outputCtx.fillStyle = '#ffffff';
+    outputCtx.fillRect(0, 0, output.width, output.height);
+    outputCtx.scale(output.width / canvas.width, output.height / canvas.height);
+    outputCtx.strokeStyle = '#111111';
+    outputCtx.globalAlpha = Number(controls.opacity.value);
+    outputCtx.lineWidth = 0.7;
+    outputCtx.lineCap = 'round';
+    outputCtx.lineJoin = 'round';
+
+    for (const path of paths) {
+      if (!path || path.length < 4) continue;
+      outputCtx.beginPath();
+      outputCtx.moveTo(path[0], path[1]);
+      for (let i = 2; i + 1 < path.length; i += 2) {
+        outputCtx.lineTo(path[i], path[i + 1]);
+      }
+      outputCtx.stroke();
+    }
+
+    output.toBlob(blob => {
+      if (!blob) {
+        statusEl.textContent = 'PNG export failed.';
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'image-field-lines.png';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }, 'image/png');
   });
 })();
 </script>
