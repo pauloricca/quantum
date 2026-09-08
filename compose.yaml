@@ -1,0 +1,17 @@
+services:
+  image-field-lines:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - animation-output:/app/.animation-output
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate --url http://image-field-lines:3000
+    depends_on:
+      - image-field-lines
+    restart: "no"
+
+volumes:
+  animation-output:

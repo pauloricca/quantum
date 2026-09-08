@@ -151,9 +151,35 @@
       text-align: center;
     }
     @media (max-width: 760px) {
-      .app { grid-template-columns: 1fr; }
-      aside { border-right: none; border-bottom: 1px solid var(--border); }
-      main { padding: 10px; }
+      html, body {
+        height: 100vh;
+        height: 100dvh;
+        min-height: 0;
+        overflow: hidden;
+      }
+      .app {
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(0, 30vh) minmax(0, 70vh);
+        grid-template-rows: minmax(0, 30dvh) minmax(0, 70dvh);
+        height: 100vh;
+        height: 100dvh;
+        overflow: hidden;
+      }
+      aside {
+        grid-column: 1;
+        grid-row: 2;
+        min-height: 0;
+        padding: 12px;
+        border-right: none;
+        border-top: 1px solid var(--border);
+        overflow-y: auto;
+      }
+      main {
+        grid-column: 1;
+        grid-row: 1;
+        min-height: 0;
+        padding: 8px;
+      }
     }
   </style>
 </head>
@@ -278,15 +304,50 @@
         <span id="jitterSpeedVal" class="value">0.02</span>
         <input id="jitterSpeed" type="range" min="0.001" max="0.15" step="any" value="0.02" />
       </label>
+
+      <label>
+        Line motion speed
+        <span id="lineSpeedVal" class="value">0</span>
+        <input id="lineSpeed" type="range" min="0" max="240" step="any" value="0" />
+      </label>
+
+      <label>
+        Line life (0 = ∞)
+        <span id="lineLifeVal" class="value">∞</span>
+        <input id="lineLife" type="range" min="0" max="20" step="any" value="0" />
+      </label>
     </div>
 
     <div class="group">
-      <label style="display:flex; grid-template-columns:none; align-items:center; gap:10px;">
-        <input id="autoRun" type="checkbox" checked />
-        <span>Automatically rerun when simulation values change</span>
+      <label>
+        Animation duration (seconds)
+        <span id="durationVal" class="value">3.00</span>
+        <input id="duration" type="range" min="0.5" max="30" step="0.1" value="3" />
+      </label>
+      <label>
+        Timeline
+        <span id="timeVal" class="value">0.00 s</span>
+        <input id="time" type="range" min="0" max="3" step="0.01" value="0" />
+      </label>
+      <label>
+        Frames per second
+        <span id="fpsVal" class="value">30</span>
+        <input id="fps" type="range" min="1" max="60" step="1" value="30" />
       </label>
       <div class="row">
-        <button id="run" class="primary" disabled>Run simulation</button>
+        <button id="play">Play</button>
+        <button id="setKeyframe">Set keyframe</button>
+      </div>
+      <div class="row">
+        <button id="deleteKeyframe">Delete keyframe</button>
+        <button id="generateAnimation" class="primary" disabled>Generate animation</button>
+      </div>
+      <div id="keyframeStatus" class="status">No keyframes yet.</div>
+    </div>
+
+    <div class="group">
+      <div class="row">
+        <button id="newSeed" class="primary" disabled>New seed</button>
         <button id="cancel" class="danger" disabled>Cancel</button>
       </div>
       <div class="row single">
@@ -316,18 +377,45 @@
   const ctx = canvas.getContext('2d');
   const fileInput = el('file');
   const drop = el('drop');
-  const runBtn = el('run');
+  const newSeedBtn = el('newSeed');
   const cancelBtn = el('cancel');
   const exportBtn = el('export');
   const exportPngBtn = el('exportPng');
   const exportSizeInput = el('exportSize');
   const statusEl = el('status');
-  const autoRun = el('autoRun');
+  const lineSpeed = el('lineSpeed');
+  const lineLife = el('lineLife');
+  const lineSpeedVal = el('lineSpeedVal');
+  const lineLifeVal = el('lineLifeVal');
+  const durationInput = el('duration');
+  const durationVal = el('durationVal');
+  const timeInput = el('time');
+  const timeVal = el('timeVal');
+  const fpsInput = el('fps');
+  const fpsVal = el('fpsVal');
+  const playBtn = el('play');
+  const setKeyframeBtn = el('setKeyframe');
+  const deleteKeyframeBtn = el('deleteKeyframe');
+  const generateAnimationBtn = el('generateAnimation');
+  const keyframeStatusEl = el('keyframeStatus');
   let autoRunTimer = null;
 
   let imageDataPayload = null;
   let worker = null;
   let paths = [];
+  // The seed is global to the image, not to an individual drawing setting.
+  // Keeping it fixed makes parameter changes and future animation frames stable.
+  let seed = 123456789;
+  let keyframes = [];
+  let playbackFrame = null;
+  let playbackStartedAt = 0;
+  let animationAbortController = null;
+
+  function createSeed() {
+    const values = new Uint32Array(1);
+    crypto.getRandomValues(values);
+    return values[0];
+  }
 
   const controls = {
     dark: el('dark'),
@@ -390,12 +478,15 @@
     valueTargets.curvatureBias.textContent = Number(controls.curvatureBias.value).toFixed(2);
     valueTargets.orientationJitter.textContent = Number(controls.orientationJitter.value).toFixed(2);
     valueTargets.jitterSpeed.textContent = Number(controls.jitterSpeed.value).toFixed(3);
+    lineSpeedVal.textContent = Number(lineSpeed.value).toFixed(0);
+    lineLifeVal.textContent = Number(lineLife.value) === 0 ? '∞' : `${Number(lineLife.value).toFixed(1)} s`;
   }
   Object.values(controls).forEach(c => c.addEventListener('input', syncLabels));
+  [lineSpeed, lineLife].forEach(control => control.addEventListener('input', syncLabels));
   syncLabels();
 
   function scheduleAutoRun() {
-    if (!autoRun.checked || !imageDataPayload) return;
+    if (!imageDataPayload || animationAbortController) return;
     clearTimeout(autoRunTimer);
     autoRunTimer = setTimeout(() => startSimulation(), 280);
   }
@@ -409,10 +500,100 @@
       }
     });
   });
-  autoRun.addEventListener('change', () => {
-    if (autoRun.checked) scheduleAutoRun();
-  });
 
+  function currentSettings() {
+    return Object.fromEntries(Object.entries(controls).map(([name, control]) => [name, Number(control.value)]));
+  }
+
+  function applySettings(settings) {
+    for (const [name, value] of Object.entries(settings)) controls[name].value = value;
+    syncLabels();
+  }
+
+  function settingsAt(time) {
+    if (!keyframes.length) return currentSettings();
+    if (time <= keyframes[0].time) return keyframes[0].settings;
+    const last = keyframes[keyframes.length - 1];
+    const duration = Number(durationInput.value);
+    const hasEndKeyframe = Math.abs(last.time - duration) < 0.005;
+    if (!hasEndKeyframe && time > last.time) {
+      const rawProgress = Math.min(1, (time - last.time) / Math.max(0.000001, duration - last.time));
+      const progress = rawProgress * rawProgress * (3 - 2 * rawProgress);
+      const first = keyframes[0];
+      return Object.fromEntries(Object.keys(last.settings).map(name => [name,
+        last.settings[name] + (first.settings[name] - last.settings[name]) * progress
+      ]));
+    }
+    if (time >= last.time) return last.settings;
+    const nextIndex = keyframes.findIndex(frame => frame.time >= time);
+    const before = keyframes[nextIndex - 1];
+    const after = keyframes[nextIndex];
+    const rawProgress = (time - before.time) / (after.time - before.time);
+    const progress = rawProgress * rawProgress * (3 - 2 * rawProgress);
+    return Object.fromEntries(Object.keys(before.settings).map(name => [name,
+      before.settings[name] + (after.settings[name] - before.settings[name]) * progress
+    ]));
+  }
+
+  function refreshTimeline() {
+    const duration = Number(durationInput.value);
+    durationVal.textContent = duration.toFixed(2);
+    timeInput.max = duration;
+    if (Number(timeInput.value) > duration) timeInput.value = duration;
+    timeVal.textContent = `${Number(timeInput.value).toFixed(2)} s`;
+    fpsVal.textContent = fpsInput.value;
+    keyframeStatusEl.textContent = keyframes.length
+      ? `Keyframes: ${keyframes.map(frame => `${frame.time.toFixed(2)}s`).join(' · ')}`
+      : 'No keyframes yet.';
+  }
+
+  function previewTimeline() {
+    if (!keyframes.length) return;
+    applySettings(settingsAt(Number(timeInput.value)));
+    scheduleAutoRun();
+  }
+
+  durationInput.addEventListener('input', refreshTimeline);
+  fpsInput.addEventListener('input', refreshTimeline);
+  timeInput.addEventListener('input', () => { refreshTimeline(); previewTimeline(); });
+  setKeyframeBtn.addEventListener('click', () => {
+    const time = Number(timeInput.value);
+    const frame = { time, settings: currentSettings() };
+    const existing = keyframes.findIndex(item => Math.abs(item.time - time) < 0.005);
+    if (existing >= 0) keyframes[existing] = frame;
+    else keyframes.push(frame);
+    keyframes.sort((a, b) => a.time - b.time);
+    refreshTimeline();
+  });
+  deleteKeyframeBtn.addEventListener('click', () => {
+    const time = Number(timeInput.value);
+    keyframes = keyframes.filter(frame => Math.abs(frame.time - time) >= 0.005);
+    refreshTimeline();
+    previewTimeline();
+  });
+  playBtn.addEventListener('click', () => {
+    if (playbackFrame) {
+      cancelAnimationFrame(playbackFrame);
+      playbackFrame = null;
+      playBtn.textContent = 'Play';
+      return;
+    }
+    playbackStartedAt = performance.now() - Number(timeInput.value) * 1000;
+    const tick = now => {
+      const duration = Number(durationInput.value);
+      const time = Math.min(duration, (now - playbackStartedAt) / 1000);
+      timeInput.value = time;
+      refreshTimeline();
+      previewTimeline();
+      if (time >= duration) {
+        playbackFrame = null;
+        playBtn.textContent = 'Play';
+      } else playbackFrame = requestAnimationFrame(tick);
+    };
+    playBtn.textContent = 'Pause';
+    playbackFrame = requestAnimationFrame(tick);
+  });
+  refreshTimeline();
   function clearCanvas() {
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -491,7 +672,8 @@
       });
       imageDataPayload = fitImageToField(img);
       resizeCanvasToImage(img);
-      runBtn.disabled = false;
+      newSeedBtn.disabled = false;
+      generateAnimationBtn.disabled = false;
       statusEl.textContent = `Image loaded into memory: ${imageDataPayload.w} × ${imageDataPayload.h} field.`;
       scheduleAutoRun();
     } catch (err) {
@@ -519,6 +701,14 @@
     let cancelled = false;
 
     function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+    function mulberry32(value) {
+      return function() {
+        let t = value += 0x6D2B79F5;
+        t = Math.imul(t ^ t >>> 15, t | 1);
+        t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    }
 
     self.onmessage = function(e) {
       const msg = e.data;
@@ -530,6 +720,7 @@
 
       cancelled = false;
       const { field, params, canvas } = msg;
+      const random = mulberry32(params.seed >>> 0);
       const w = field.w, h = field.h;
       const gray = new Float32Array(field.gray);
       const contrast = buildContrast(gray, w, h, params.smooth);
@@ -551,13 +742,13 @@
         // Each line also receives up to ±20% variation in its maximum radius.
         const baseMaxRadius =
           Math.min(canvas.width, canvas.height) * 0.5 * params.spawnSpread;
-        const radiusVariation = 0.8 + Math.random() * 0.4;
+        const radiusVariation = 0.8 + random() * 0.4;
         const lineMaxRadius = Math.min(
           Math.min(canvas.width, canvas.height) * 0.5,
           baseMaxRadius * radiusVariation
         );
-        const spawnAngle = Math.random() * Math.PI * 2;
-        const spawnRadius = Math.sqrt(Math.random()) * lineMaxRadius;
+        const spawnAngle = random() * Math.PI * 2;
+        const spawnRadius = Math.sqrt(random()) * lineMaxRadius;
 
         let x = cx + Math.cos(spawnAngle) * spawnRadius;
         let y = cy + Math.sin(spawnAngle) * spawnRadius;
@@ -567,7 +758,7 @@
         let mag = Math.hypot(dx, dy);
         if (mag < 0.000001) {
           // At the exact centre there is no natural inward direction.
-          const angle = Math.random() * Math.PI * 2;
+          const angle = random() * Math.PI * 2;
           dx = Math.cos(angle);
           dy = Math.sin(angle);
         } else {
@@ -577,7 +768,7 @@
 
         // Add up to ±20% directional variation around the inward heading.
         // Here 20% maps to ±0.2π radians, i.e. roughly ±36 degrees.
-        const headingJitter = (Math.random() * 2 - 1) * Math.PI * 0.2;
+        const headingJitter = (random() * 2 - 1) * Math.PI * 0.2;
         const cosJ = Math.cos(headingJitter);
         const sinJ = Math.sin(headingJitter);
         const jitteredDx = dx * cosJ - dy * sinJ;
@@ -585,14 +776,17 @@
         dx = jitteredDx;
         dy = jitteredDy;
 
-        const pts = new Float32Array((params.length + 1) * 2);
+        // Keep extra trajectory ahead of the visible line so it can move while
+        // retaining the line length selected by the user.
+        const traceLength = params.length + (params.motionTravel || 0);
+        const pts = new Float32Array((traceLength + 1) * 2);
         pts[0] = x; pts[1] = y;
         let used = 1;
 
         // Each line receives a stable random offset around the global inertia.
         // At maximum variation, lines can differ by up to ±0.5.
         const lineInertia = clamp(
-          params.inertia + (Math.random() * 2 - 1) * params.inertiaVariation,
+          params.inertia + (random() * 2 - 1) * params.inertiaVariation,
           0,
           0.995
         );
@@ -605,11 +799,11 @@
 
         // Per-line smooth orientation noise. Two incommensurate sine waves
         // create a gently wandering signal without abrupt random changes.
-        const jitterPhaseA = Math.random() * Math.PI * 2;
-        const jitterPhaseB = Math.random() * Math.PI * 2;
-        const jitterRateVariation = 0.75 + Math.random() * 0.5;
+        const jitterPhaseA = random() * Math.PI * 2;
+        const jitterPhaseB = random() * Math.PI * 2;
+        const jitterRateVariation = 0.75 + random() * 0.5;
 
-        for (let i = 0; i < params.length; i++) {
+        for (let i = 0; i < traceLength; i++) {
           // Sample ahead of the particle so it can anticipate changes in the
           // field rather than only reacting once it reaches them.
           const sampleX = x + dx * params.lookAhead;
@@ -791,7 +985,7 @@
     return new Worker(URL.createObjectURL(blob));
   }
 
-  function drawPaths(allPaths) {
+  function drawPaths(allPaths, elapsed = null) {
     clearCanvas();
     ctx.strokeStyle = '#111111';
     ctx.globalAlpha = Number(controls.opacity.value);
@@ -799,11 +993,27 @@
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
+    const speed = Number(lineSpeed.value);
+    const life = Number(lineLife.value);
+    const visiblePoints = Math.round(Number(controls.length.value)) + 1;
     for (const p of allPaths) {
-      if (p.length < 4) continue;
+      const pointCount = p.length / 2;
+      if (pointCount < 2) continue;
+      const span = Math.min(pointCount - 1, visiblePoints - 1);
+      let head = span;
+      let tail = 0;
+      if (elapsed !== null && speed > 0) {
+        head = Math.min(pointCount - 1, span + Math.floor(elapsed * speed));
+        tail = head - span;
+        if (life > 0 && elapsed > life) {
+          head = Math.min(pointCount - 1, span + Math.floor(life * speed));
+          tail = Math.min(head, head - span + Math.floor((elapsed - life) * speed));
+        }
+      }
+      if (head - tail < 1) continue;
       ctx.beginPath();
-      ctx.moveTo(p[0], p[1]);
-      for (let i = 2; i < p.length; i += 2) {
+      ctx.moveTo(p[tail * 2], p[tail * 2 + 1]);
+      for (let i = (tail + 1) * 2; i <= head * 2; i += 2) {
         ctx.lineTo(p[i], p[i + 1]);
       }
       ctx.stroke();
@@ -821,7 +1031,6 @@
     if (worker) worker.terminate();
     worker = makeWorker();
 
-    runBtn.disabled = true;
     cancelBtn.disabled = false;
     exportBtn.disabled = true;
     exportPngBtn.disabled = true;
@@ -834,13 +1043,11 @@
       } else if (msg.type === 'done') {
         drawPaths(msg.paths.map(p => new Float32Array(p)));
         statusEl.textContent = `Done. ${msg.paths.length} lines generated.`;
-        runBtn.disabled = false;
         cancelBtn.disabled = true;
         worker.terminate();
         worker = null;
       } else if (msg.type === 'cancelled') {
         statusEl.textContent = 'Simulation cancelled.';
-        runBtn.disabled = false;
         cancelBtn.disabled = true;
         worker.terminate();
         worker = null;
@@ -849,7 +1056,6 @@
 
     worker.onerror = err => {
       statusEl.textContent = 'Worker error: ' + err.message;
-      runBtn.disabled = false;
       cancelBtn.disabled = true;
       worker.terminate();
       worker = null;
@@ -863,38 +1069,149 @@
         h: imageDataPayload.h,
         gray: grayCopy.buffer
       },
-      params: {
-        dark: Number(controls.dark.value),
-        bright: Number(controls.bright.value),
-        edge: Number(controls.edge.value),
-        count: Number(controls.count.value),
-        length: Number(controls.length.value),
-        center: Number(controls.center.value),
-        spawnSpread: Number(controls.spawnSpread.value),
-        fieldScale: Number(controls.fieldScale.value),
-        lookAhead: Number(controls.lookAhead.value),
-        step: Number(controls.step.value),
-        smooth: Number(controls.smooth.value),
-        inertia: Number(controls.inertia.value),
-        inertiaVariation: Number(controls.inertiaVariation.value),
-        speedGain: Number(controls.speedGain.value),
-        curvatureBias: Number(controls.curvatureBias.value),
-        orientationJitter: Number(controls.orientationJitter.value),
-        jitterSpeed: Number(controls.jitterSpeed.value)
-      },
+      params: simulationParams(),
       canvas: { width: canvas.width, height: canvas.height }
     }, [grayCopy.buffer]);
   }
 
-  runBtn.addEventListener('click', startSimulation);
+  function simulationParams(includeMotion = false) {
+    const motionDuration = Number(lineLife.value) || Number(durationInput.value);
+    const motionTravel = Math.min(
+      Number(controls.length.value),
+      Math.ceil(Number(lineSpeed.value) * motionDuration)
+    );
+    return { ...currentSettings(), seed, motionTravel: includeMotion ? motionTravel : 0 };
+  }
 
-  cancelBtn.addEventListener('click', () => {
+  function renderAnimationFrame(signal, time) {
+    return new Promise((resolve, reject) => {
+      if (signal.aborted) return reject(new DOMException('Animation cancelled.', 'AbortError'));
+      const frameWorker = makeWorker();
+      const grayCopy = imageDataPayload.gray.slice();
+      const cancel = () => {
+        frameWorker.terminate();
+        reject(new DOMException('Animation cancelled.', 'AbortError'));
+      };
+      signal.addEventListener('abort', cancel, { once: true });
+      frameWorker.onmessage = e => {
+        const msg = e.data;
+        if (msg.type !== 'done') return;
+        signal.removeEventListener('abort', cancel);
+        frameWorker.terminate();
+        const framePaths = msg.paths.map(path => new Float32Array(path));
+        drawPaths(framePaths, time);
+        resolve();
+      };
+      frameWorker.onerror = error => {
+        signal.removeEventListener('abort', cancel);
+        frameWorker.terminate();
+        reject(error);
+      };
+      frameWorker.postMessage({
+        type: 'run',
+        field: { w: imageDataPayload.w, h: imageDataPayload.h, gray: grayCopy.buffer },
+        params: simulationParams(true),
+        canvas: { width: canvas.width, height: canvas.height }
+      }, [grayCopy.buffer]);
+    });
+  }
+
+  function canvasPng() {
+    return new Promise((resolve, reject) => canvas.toBlob(blob => {
+      if (blob) resolve(blob);
+      else reject(new Error('Could not encode the animation frame.'));
+    }, 'image/png'));
+  }
+
+  async function generateAnimation() {
+    if (!imageDataPayload || animationAbortController) return;
+    if (!keyframes.length) {
+      statusEl.textContent = 'Set at least one keyframe before generating an animation.';
+      return;
+    }
+    const controller = new AbortController();
+    animationAbortController = controller;
     clearTimeout(autoRunTimer);
     if (worker) {
       worker.terminate();
       worker = null;
+    }
+    if (playbackFrame) {
+      cancelAnimationFrame(playbackFrame);
+      playbackFrame = null;
+      playBtn.textContent = 'Play';
+    }
+    const duration = Number(durationInput.value);
+    const fps = Number(fpsInput.value);
+    const frameCount = Math.ceil(duration * fps);
+    let jobId = null;
+    generateAnimationBtn.disabled = true;
+    newSeedBtn.disabled = true;
+    cancelBtn.disabled = false;
+    Object.values(controls).forEach(control => { control.disabled = true; });
+    [lineSpeed, lineLife].forEach(control => { control.disabled = true; });
+    [durationInput, timeInput, fpsInput, playBtn, setKeyframeBtn, deleteKeyframeBtn].forEach(control => { control.disabled = true; });
+    try {
+      const response = await fetch('/api/animation-exports', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
+        body: JSON.stringify({ fps, width: canvas.width, height: canvas.height })
+      });
+      const job = await response.json();
+      if (!response.ok) throw new Error(job.error || 'Could not start animation export.');
+      jobId = job.id;
+      for (let frame = 0; frame < frameCount; frame++) {
+        if (controller.signal.aborted) throw new DOMException('Animation cancelled.', 'AbortError');
+        const time = frame / fps;
+        timeInput.value = time;
+        refreshTimeline();
+        applySettings(settingsAt(time));
+        statusEl.textContent = `Rendering animation frame ${frame + 1} / ${frameCount}…`;
+        await renderAnimationFrame(controller.signal, time);
+        const uploaded = await fetch(`/api/animation-exports/${jobId}/frames/${frame}`, {
+          method: 'PUT', headers: { 'Content-Type': 'image/png' }, body: await canvasPng(), signal: controller.signal
+        });
+        if (!uploaded.ok) throw new Error((await uploaded.json()).error || 'Could not send animation frame.');
+      }
+      statusEl.textContent = 'Encoding video…';
+      const finished = await fetch(`/api/animation-exports/${jobId}/finish`, { method: 'POST', signal: controller.signal });
+      const result = await finished.json();
+      if (!finished.ok) throw new Error(result.error || 'Could not encode video.');
+      const download = document.createElement('a');
+      download.href = result.downloadUrl;
+      download.download = 'image-field-lines.mp4';
+      document.body.append(download);
+      download.click();
+      download.remove();
+      statusEl.textContent = 'Animation complete. Your MP4 download has started.';
+    } catch (error) {
+      if (jobId) fetch(`/api/animation-exports/${jobId}/cancel`, { method: 'POST', keepalive: true }).catch(() => {});
+      statusEl.textContent = error.name === 'AbortError' ? 'Animation cancelled.' : `Animation export failed: ${error.message}`;
+    } finally {
+      animationAbortController = null;
+      generateAnimationBtn.disabled = !imageDataPayload;
+      newSeedBtn.disabled = !imageDataPayload;
+      cancelBtn.disabled = true;
+      Object.values(controls).forEach(control => { control.disabled = false; });
+      [lineSpeed, lineLife].forEach(control => { control.disabled = false; });
+      [durationInput, timeInput, fpsInput, playBtn, setKeyframeBtn, deleteKeyframeBtn].forEach(control => { control.disabled = false; });
+    }
+  }
+
+  newSeedBtn.addEventListener('click', () => {
+    if (!imageDataPayload) return;
+    seed = createSeed();
+    startSimulation();
+  });
+
+  generateAnimationBtn.addEventListener('click', generateAnimation);
+
+  cancelBtn.addEventListener('click', () => {
+    clearTimeout(autoRunTimer);
+    if (animationAbortController) animationAbortController.abort();
+    if (worker) {
+      worker.terminate();
+      worker = null;
       statusEl.textContent = 'Simulation cancelled.';
-      runBtn.disabled = false;
       cancelBtn.disabled = true;
     }
   });
